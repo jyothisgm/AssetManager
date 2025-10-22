@@ -43,5 +43,4 @@ python "$BASE_DIR"/manage.py import_grocery_csv "$BASE_DIR"/NetherlandsGrocery.c
 echo "💱 Fetching latest currency rates..."
 python "$BASE_DIR"/manage.py fetch_currency_rate
 
-echo "🚀 Starting development server..."
-python "$BASE_DIR"/manage.py runserver
+echo "🚀 Starting production server..."
