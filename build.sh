@@ -2,7 +2,7 @@
 # set -e  # stop on first error
 
 # Base dir (project root)
-BASE_DIR="$(dirname "$0")"
+BASE_DIR="$(realpath "$(dirname "$0")")"
 
 echo "🧹 Cleaning migrations and database..."
 rm -rf "$BASE_DIR"/account/migrations/* "$BASE_DIR"/ai/migrations/* "$BASE_DIR"/analytics/migrations/* "$BASE_DIR"/catalog/migrations/*
