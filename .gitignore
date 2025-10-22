@@ -240,3 +240,5 @@ poetry.toml
 # Django static files and media
 /media/
 /staticfiles/
+
+.DS_Store

@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<h2>📸 Upload Transaction Receipt</h2>
+
+<form method="post" enctype="multipart/form-data" style="margin-top: 20px;">
+    {% csrf_token %}
+
+    <!-- Account selection -->
+    <label for="id_account"><strong>Select account:</strong></label><br>
+    <select name="account" id="id_account" required style="min-width: 250px; padding: 6px;">
+        <option value="">-- Choose Account --</option>
+        {% for acc in accounts %}
+            <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.currency.code }})</option>
+        {% endfor %}
+    </select>
+    <br><br>
+
+    <!-- File upload -->
+    <label for="id_image"><strong>Select or capture receipt image:</strong></label><br>
+    <input type="file" name="image" id="id_image" accept="image/*" capture="environment" required>
+    <input type="hidden" name="browser_timezone" id="id_browser_timezone">
+    <br><br>
+
+    <button type="submit" class="button default" style="background-color:#4CAF50;color:white;">
+        ⬆️ Upload
+    </button>
+    <a href=".." class="button cancel-link">Cancel</a>
+</form>
+
+<p style="margin-top:15px;color:#666;">
+    Supported formats: JPG, PNG.<br>
+    The system will automatically extract store, date, items, and amount from the receipt.
+</p>
+
+<script>
+    // Set user's browser timezone name before form submission
+    document.addEventListener("DOMContentLoaded", () => {
+        const tzField = document.getElementById("id_browser_timezone");
+        if (tzField) tzField.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    });
+</script>
+{% endblock %}

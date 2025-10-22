@@ -1,5 +1,6 @@
 from django.db import models
-from common.models import TimeStampedModel, Unit
+from common.models import TimeStampedModel
+from django.utils import timezone
 
 # ---------- Category ----------
 class CategoryGroup(TimeStampedModel):
@@ -10,15 +11,15 @@ class CategoryGroup(TimeStampedModel):
 
 class PurchaseCategory(TimeStampedModel):
     name = models.CharField(max_length=100, unique=True)
-    preferred = models.ForeignKey("self", related_name="variants",
-                                  on_delete=models.SET_NULL, null=True, blank=True)
     description = models.TextField(blank=True, null=True)
-    groups = models.ManyToManyField(CategoryGroup, related_name="categories", blank=True)
-    def canonical(self): return self.preferred or self
+    group = models.ForeignKey(CategoryGroup, related_name="categories", blank=True, null=True, on_delete=models.SET_NULL)
+
+    def canonical(self): 
+        return self
+
     def __str__(self):
-        groups = ", ".join(g.name for g in self.groups.all()) if self.pk else ""
-        label = self.name + (f" ({groups})" if groups else "")
-        if self.preferred: label += f" → {self.preferred.name}"
+        group = self.group if self.pk else ""
+        label = self.name + f" -> ({group})" 
         return label
 
 
@@ -26,47 +27,67 @@ class PurchaseCategory(TimeStampedModel):
 class Brand(TimeStampedModel):
     name = models.CharField(max_length=255, unique=True)
     preferred = models.ForeignKey("self", related_name="variants",
-                                  on_delete=models.SET_NULL, null=True, blank=True)
+                                    on_delete=models.SET_NULL, null=True, blank=True)
     def canonical(self): return self.preferred or self
     def __str__(self): return self.name
 
 
-class ItemName(TimeStampedModel):
+class Product(TimeStampedModel):
     name = models.CharField(max_length=255, unique=True)
     preferred = models.ForeignKey("self", related_name="variants",
-                                  on_delete=models.SET_NULL, null=True, blank=True)
+                                    on_delete=models.SET_NULL, null=True, blank=True)
     brand = models.ForeignKey("catalog.Brand", related_name="items",
-                              on_delete=models.SET_NULL, null=True, blank=True)
+                                on_delete=models.SET_NULL, null=True, blank=True)
     preferred_unit = models.ForeignKey("common.Unit", related_name="default_for_items",
-                                       on_delete=models.SET_NULL, null=True, blank=True)
+                                        on_delete=models.SET_NULL, null=True, blank=True)
+    category = models.ForeignKey(PurchaseCategory, related_name="products", on_delete=models.SET_NULL,
+                                    null=True, blank=True)
 
-    def canonical(self): return self.preferred or self
+    def canonical(self):
+        return self.preferred or self
+
     def get_preferred_unit(self):
         if self.preferred_unit: return self.preferred_unit
         if self.preferred and self.preferred.preferred_unit:
             return self.preferred.preferred_unit
         return None
-    def __str__(self):
-        return f"{self.name}" + (f" → {self.preferred.name}" if self.preferred else "")
 
+    def __str__(self):
+        label = self.name
+        category = None
+        if self.preferred:
+            label += f" → {self.preferred.name}"
+            category = self.preferred.category
+        else:
+            category = self.category
+
+        if category:
+            label += f" ({category.name})"
+
+        return label
 
 # ---------- Store ----------
 class Store(TimeStampedModel):
     name = models.CharField(max_length=255, unique=True)
-    preferred = models.ForeignKey("self", related_name="variants",
-                                    on_delete=models.SET_NULL, null=True, blank=True)
-    category = models.ForeignKey("catalog.PurchaseCategory", related_name="stores",
-                                    on_delete=models.SET_NULL, null=True, blank=True)
+    preferred = models.ForeignKey(
+        "self", related_name="variants",
+        on_delete=models.SET_NULL, null=True, blank=True
+    )
+    categories = models.ManyToManyField(PurchaseCategory, related_name="stores", blank=True)
 
-    def canonical(self): 
+    def canonical(self):
         return self.preferred or self
 
     def __str__(self):
         label = self.preferred.name if self.preferred else self.name
-        if self.category:
-            groups = ", ".join(g.name for g in self.category.groups.all())
-            return f"{label} ({self.category.name}{' - ' + groups if groups else ''})"
+
+        # Show up to 2 categories in parentheses (to keep it readable)
+        cats = self.categories.all()[:2]
+        if cats:
+            cat_labels = ", ".join(c.name for c in cats)
+            return f"{label} ({cat_labels})"
         return label
+
 
 
 # ---------- Institution ----------
@@ -159,7 +180,8 @@ class ExchangeRateRecord(TimeStampedModel):
     market_rate = models.DecimalField(
         max_digits=20,
         decimal_places=8,
-        help_text="Mid-market rate at the time (e.g. ECB or CoinGecko)"
+        help_text="Mid-market rate at the time (e.g. ECB or CoinGecko)",
+        null=True, blank=True
     )
     provider_rate = models.DecimalField(
         max_digits=20,
@@ -182,6 +204,8 @@ class ExchangeRateRecord(TimeStampedModel):
         default=0,
         help_text="Markup percentage between market and provider rate"
     )
+    
+    date = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ["-created_at"]

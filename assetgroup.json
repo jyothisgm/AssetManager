@@ -1,0 +1,11 @@
+[{"DEVICE_ID":1,"uid":"1","IS_DEL":0,"USETIME":1724160609846,"ACC_GROUP_NAME":"Accounts","TYPE":1,"ORDERSEQ":2,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":2,"uid":"2","IS_DEL":0,"USETIME":1724160609846,"ACC_GROUP_NAME":"Card","TYPE":2,"ORDERSEQ":3,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":3,"uid":"3","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Debit Card","TYPE":3,"ORDERSEQ":4,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":4,"uid":"4","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Savings","TYPE":4,"ORDERSEQ":5,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":5,"uid":"5","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Loan","TYPE":5,"ORDERSEQ":9,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":6,"uid":"6","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Top-Up/Prepaid","TYPE":6,"ORDERSEQ":6,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":7,"uid":"7","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Others","TYPE":7,"ORDERSEQ":11,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":8,"uid":"8","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Investments","TYPE":8,"ORDERSEQ":7,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":9,"uid":"9","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Overdrafts","TYPE":9,"ORDERSEQ":8,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":10,"uid":"10","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Insurance","TYPE":10,"ORDERSEQ":10,"isSynced":0,"syncTime":null,"syncVersion":null},
+{"DEVICE_ID":11,"uid":"11","IS_DEL":0,"USETIME":1724160609847,"ACC_GROUP_NAME":"Cash","TYPE":11,"ORDERSEQ":1,"isSynced":0,"syncTime":null,"syncVersion":null}]

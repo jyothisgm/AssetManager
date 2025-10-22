@@ -27,9 +27,9 @@ class Unit(TimeStampedModel):
     symbol = models.CharField(max_length=10, blank=True, null=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
     preferred = models.ForeignKey("self", related_name="variants",
-                                  on_delete=models.SET_NULL, null=True, blank=True)
+                                    on_delete=models.SET_NULL, null=True, blank=True)
     base_unit = models.ForeignKey("self", related_name="derived_units",
-                                  on_delete=models.SET_NULL, null=True, blank=True)
+                                    on_delete=models.SET_NULL, null=True, blank=True)
     conversion_to_base = models.FloatField(null=True, blank=True)
 
     def canonical(self):
@@ -37,10 +37,10 @@ class Unit(TimeStampedModel):
 
     def __str__(self):
         base = f" (1 {self.symbol or self.name} = {self.conversion_to_base or 1} " \
-               f"{self.base_unit.symbol if self.base_unit else self.symbol})"
-        label = f"{self.name} ({self.symbol or ''})"
+                f"{self.base_unit.symbol if self.base_unit else self.symbol})"
+        label = f"{self.name}"
         if self.preferred:
-            label += f" → {self.preferred.name}"
+            label += f" → {self.preferred.symbol}"
         return label + base
 
 

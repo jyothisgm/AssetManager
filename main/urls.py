@@ -21,7 +21,10 @@ from django.conf import settings
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/bills/', include('bills.urls')),  # your app routes
+    # path('api/bills/', include('bills.urls')),  # your app routes
+    path("api/v1/auth/", include("oauth2_provider.urls", namespace="oauth2_provider")),
+    path("api/v1/user/", include("user.urls")),
+
 ]
 
 if settings.DEBUG:
