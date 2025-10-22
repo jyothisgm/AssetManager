@@ -35,11 +35,7 @@ echo "📁 Collecting static files..."
 python "$BASE_DIR"/manage.py collectstatic --noinput
 
 echo "⬇️ Importing legacy data..."
-python "$BASE_DIR"/manage.py import_legacy_assets \
-    --assetgroup "$BASE_DIR"/assetgroup.json \
-    --assets "$BASE_DIR"/assets.json \
-    --transactions "$BASE_DIR"/transactions.json \
-    --categories "$BASE_DIR"/category.json
+python "$BASE_DIR"/manage.py import_legacy_assets --assetgroup "$BASE_DIR"/assetgroup.json --assets "$BASE_DIR"/assets.json --transactions "$BASE_DIR"/transactions.json --categories "$BASE_DIR"/category.json
 
 echo "🛒 Importing grocery CSV..."
 python "$BASE_DIR"/manage.py import_grocery_csv "$BASE_DIR"/NetherlandsGrocery.csv
