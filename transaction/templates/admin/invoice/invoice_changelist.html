@@ -2,9 +2,20 @@
 
 {% block object-tools-items %}
 <li>
-    <a href="{% url 'admin:transactions_upload_bill' %}" class="button" style="background:#4CAF50;color:white;">
-        📸 Upload Transaction
-    </a>
+  <a href="{% url 'admin:transactions_upload_bill' %}" class="button" style="background:#4CAF50;">
+    📸 Upload Transaction
+  </a>
 </li>
 {{ block.super }}
+{% endblock %}
+
+{% block content %}
+  {% if custom_totals %}
+  <div class="results-summary"
+       style="margin:10px 0;padding:8px;border:1px solid ">
+      <h3 style="margin:0 0 5px;">💰 Total Amount by Currency</h3>
+      {{ custom_totals|safe }}
+  </div>
+  {% endif %}
+  {{ block.super }}
 {% endblock %}

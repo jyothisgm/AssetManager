@@ -4,6 +4,8 @@ import re
 import uuid
 from datetime import datetime, timedelta
 import pytz
+
+from django.db.models import Q, F, ExpressionWrapper, DecimalField
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -47,7 +49,7 @@ class Command(BaseCommand):
 
         # --- Setup constants ---
         amsterdam_tz = pytz.timezone("Europe/Amsterdam")
-        buffer_hours = 240
+        buffer_hours = 48
         amount_tolerance = 0.05
 
         UNIT_ALIASES = {
@@ -107,29 +109,11 @@ class Command(BaseCommand):
                 store_ref.save()
 
             preferred_store = store_ref.preferred or store_ref
-
-            # Try to match existing transaction (same preferred store + ~date + ~amount)
-            from django.db.models import Q
-
-            preferred_store = store_ref.preferred or store_ref
-
             # Look for candidates by store or preferred
+
             candidate_qs = Transaction.objects.filter(
-                # Q(store=preferred_store) | Q(store__preferred=preferred_store)
+                Q(store=preferred_store) | Q(store__preferred=preferred_store)
             ).order_by('-date')
-
-            
-
-            # for t in candidate_qs:
-            #     delta_hours = abs((t.date - bill_date).total_seconds()) / 3600
-            #     self.stdout.write(
-            #         f"      → {t.date.date()} | €{t.amount:.2f} | Δ {delta_hours:.1f}h"
-            #     )
-
-            # 💡 Now perform actual fuzzy match
-            
-            from django.db.models import Q, F, ExpressionWrapper, DecimalField
-            from datetime import timedelta
 
             # Define tolerance and date window
             amount_lower = total_amount - amount_tolerance
@@ -139,7 +123,7 @@ class Command(BaseCommand):
 
             # 🔍 Candidate transactions (ignore store name)
             candidate_qs = (
-                Transaction.objects.filter(
+                candidate_qs.filter(
                     date__gte=date_lower,
                     date__lte=date_upper,
                 )
@@ -153,6 +137,9 @@ class Command(BaseCommand):
             )
 
             # ✅ Try to match by normal or converted amount
+            if amount_lower < 0:
+                amount_lower = -amount_lower
+                amount_upper = -amount_upper
             matched_tx = (
                 candidate_qs.filter(
                     Q(amount__gte=amount_lower, amount__lte=amount_upper)
@@ -233,7 +220,17 @@ class Command(BaseCommand):
 
             # Update date to CSV date
             matched_tx.date = bill_date
-            matched_tx.amount = Decimal(str(total_amount))
+            expected_amount = Decimal(str(total_amount))  # convert safely from float or str
+            if matched_tx.amount != expected_amount:
+                diff = matched_tx.amount - expected_amount
+                print(
+                    f"⚠️ Amount mismatch for Transaction #{matched_tx.id} "
+                    f"({matched_tx.store.name if matched_tx.store else 'No Store'}) "
+                    f"on {matched_tx.date.strftime('%Y-%m-%d')} [{matched_tx.currency.code if matched_tx.currency else 'No Currency'}]\n"
+                    f"→ Expected: {total_amount:.2f}, Found: {matched_tx.amount:.2f}, Difference: {diff:+.2f}"
+                )
+
+            # matched_tx.amount = Decimal(str(total_amount))
             matched_tx.processed = True
             matched_tx.save()
 

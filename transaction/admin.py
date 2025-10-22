@@ -5,9 +5,12 @@ from datetime import timedelta
 
 from django.contrib import admin, messages
 from django.shortcuts import render, redirect
+from django.db.models import Sum, Case, When, F, DecimalField
 from django.urls import path
 from django.utils import timezone
 from django.utils.html import format_html
+from rangefilter.filters import DateRangeFilter
+
 
 from account.models import Account
 from transaction.admin_forms import TransactionItemInlineForm
@@ -52,6 +55,7 @@ class TransactionItemInline(admin.TabularInline):
 # -----------------------------------
 # TRANSACTION ADMIN
 # -----------------------------------
+
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
     list_display = (
@@ -69,18 +73,57 @@ class TransactionAdmin(admin.ModelAdmin):
         "description",
         "category__name",
     )
-    readonly_fields = ("processed", "view_attachment", "created_at", "modified_at")
     list_filter = (
+        ("date", DateRangeFilter),
         "transaction_type",
         ("currency", RelatedOnlyFieldListFilter),
         ("account", RelatedOnlyFieldListFilter),
         ("category", RelatedOnlyFieldListFilter),
         ("store", RelatedOnlyFieldListFilter),
-        
     )
+    search_fields = ("description",)
     ordering = ("-date",)
+    readonly_fields = ("processed", "view_attachment", "created_at", "modified_at")
+    
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
+
+    def changelist_view(self, request, extra_context=None):
+        """Add currency totals to context based on filters."""
+        response = super().changelist_view(request, extra_context=extra_context)
+        try:
+            queryset = response.context_data["cl"].queryset
+
+            # ✅ Aggregate totals grouped by currency (after filters applied)
+            totals = (
+                    queryset.values("currency__code")
+                    .annotate(
+                        total=Sum(
+                            Case(
+                                When(transaction_type__in=["credit", "transfer_credit"], then=F("amount")),
+                                When(transaction_type__in=["debit", "transfer_debit"], then=-F("amount")),
+                                default=0,
+                                output_field=DecimalField(max_digits=20, decimal_places=2),
+                            )
+                        )
+                    )
+                    .order_by("currency__code")
+                )
+
+            if totals:
+                total_html = "<br>".join(
+                    f"<b>{row['currency__code']}</b>: {round(row['total'], 2):,}"
+                    for row in totals
+                )
+                response.context_data["custom_totals"] = format_html(total_html)
+
+        except Exception as e:
+            print("Error generating totals:", e)
+
+        return response
+
+
+        return response
 
     def get_urls(self):
         urls = super().get_urls()

@@ -2,6 +2,9 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import User, Role
 
+admin.site.site_header = "Asset Manager Admin"
+admin.site.site_title = "Asset Manager Portal"
+admin.site.index_title = "Welcome to the Asset Manager Dashboard"
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     fieldsets = (
