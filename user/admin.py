@@ -70,6 +70,7 @@ class UserAdmin(BaseUserAdmin):
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Personal info", {"fields": ("first_name", "last_name")}),
+        ("Keys", {"fields": ("gemini_key",)}),
         ("Roles & Permissions", {"fields": ("roles", "is_active", "is_staff", "is_superuser")}),
     )
     add_fieldsets = ((None, {"fields": ("email", "password1", "password2")}),)
@@ -110,6 +111,7 @@ class UserAdmin(BaseUserAdmin):
                 fieldsets = (
                     (None, {"fields": ("email", "password")}),
                     ("Personal info", {"fields": ("first_name", "last_name")}),
+                    ("Keys", {"fields": ("gemini_key",)}),
                     ("Roles & Permissions", {"fields": ("roles",)}),
                 )
                 return fieldsets
