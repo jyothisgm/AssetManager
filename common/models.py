@@ -1,5 +1,5 @@
 from django.db import models
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 class SoftDeleteQuerySet(models.QuerySet):
@@ -36,7 +36,7 @@ class SoftDeleteQuerySet(models.QuerySet):
 
         except Exception as e:
             logger.exception(f"[{func_name}] Error during create operation")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
@@ -48,7 +48,7 @@ class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
             return qs
         except Exception as e:
             logger.exception(f"[{func_name}] Failed to build queryset")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 # ---------- Base ----------
@@ -73,7 +73,7 @@ class TimeStampedModel(models.Model):
             logger.debug(f"[{func_name}] Marked as deleted successfully")
         except Exception as e:
             logger.exception(f"[{func_name}] Error during soft delete")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def hard_delete(self, *args, **kwargs):
         """Actual delete if ever needed"""
@@ -84,7 +84,7 @@ class TimeStampedModel(models.Model):
             logger.debug(f"[{func_name}] Hard delete completed")
         except Exception as e:
             logger.exception(f"[{func_name}] Error during hard delete")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 # ---------- Units ----------
@@ -116,7 +116,7 @@ class Unit(TimeStampedModel):
             return result
         except Exception as e:
             logger.exception(f"[{func_name}] Error computing canonical unit")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def __str__(self):
         base = f" (1 {self.symbol or self.name} = {self.conversion_to_base or 1} " \
@@ -161,4 +161,4 @@ class Currency(TimeStampedModel):
             return self
         except Exception as e:
             logger.exception(f"[{func_name}] Error in canonical method")
-            raise_with_line_info(func_name, e)
+            raise e

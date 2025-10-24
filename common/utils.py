@@ -1,6 +1,6 @@
 from common.models import Unit
 from django.db.models import Q
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 def get_or_create_unit(name: str):
@@ -21,7 +21,7 @@ def get_or_create_unit(name: str):
         return unit
     except Exception as e:
         logger.exception(f"[{func_name}] Error retrieving or creating unit for name='{name}'")
-        raise_with_line_info(func_name, e)
+        raise e
 
 
 def convert_quantity(value: float, from_unit, to_unit) -> float:
@@ -73,4 +73,4 @@ def convert_quantity(value: float, from_unit, to_unit) -> float:
         return converted_value, ''
     except Exception as e:
         logger.exception(f"[{func_name}] Error during conversion value={value}, from={from_unit}, to={to_unit}")
-        raise_with_line_info(func_name, e)
+        raise e

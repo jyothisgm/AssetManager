@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import Attachment, User, Role
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 admin.site.site_header = "Asset Manager Admin"
 admin.site.site_title = "Asset Manager Portal"
@@ -22,7 +22,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             logger.info(f"[{func_name}] Object saved successfully by {request.user.email}: {obj}")
         except Exception as e:
             logger.exception(f"[{func_name}] Error saving object by {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def has_change_permission(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.has_change_permission"
@@ -34,7 +34,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             return True
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking change permission")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def has_delete_permission(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.has_delete_permission"
@@ -46,7 +46,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             return True
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking delete permission")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class RestrictedAdmin(RestrictedViewAdmin):
@@ -62,7 +62,7 @@ class RestrictedAdmin(RestrictedViewAdmin):
             return filtered
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching queryset for {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 @admin.register(User)
@@ -87,7 +87,7 @@ class UserAdmin(BaseUserAdmin):
             return super().get_readonly_fields(request, obj)
         except Exception as e:
             logger.exception(f"[{func_name}] Error getting readonly fields")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def get_queryset(self, request):
         func_name = f"{self.__class__.__name__}.get_queryset"
@@ -101,7 +101,7 @@ class UserAdmin(BaseUserAdmin):
             return filtered
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching queryset for {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def get_fieldsets(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.get_fieldsets"
@@ -118,7 +118,7 @@ class UserAdmin(BaseUserAdmin):
             return super().get_fieldsets(request, obj)
         except Exception as e:
             logger.exception(f"[{func_name}] Error getting fieldsets")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 @admin.register(Role)

@@ -15,7 +15,6 @@ from catalog.utils import (
     get_or_create_product_name,
     get_or_create_store,
 )
-from common.helpers import raise_with_line_info
 from common.utils import convert_quantity, get_or_create_unit
 from common.logging_config import logger
 
@@ -47,7 +46,7 @@ def process_transaction_file(transaction_file):
                     transaction_file_bytes = f.read()
         except Exception as e:
             logger.exception(f"[{func_name}] Error reading file {transaction_file}")
-            raise_with_line_info(func_name, e)
+            raise e
 
         mime_type, _ = mimetypes.guess_type(file_name)
         mime_type = mime_type or "application/octet-stream"
@@ -83,7 +82,7 @@ def process_transaction_file(transaction_file):
                 )
             except Exception as e:
                 logger.exception(f"[{func_name}] Gemini API call failed")
-                raise_with_line_info(func_name, e)
+                raise e
 
             if raw_text.startswith("```"):
                 raw_text = raw_text.strip("`").replace("json", "", 1).strip()
@@ -204,7 +203,7 @@ def process_transaction_file(transaction_file):
 
                 except Exception as e:
                     logger.exception(f"[{func_name}] Error parsing transaction data: {tx_data}")
-                    raise_with_line_info(func_name, e)
+                    raise e
 
             if prompt_addition:
                 tries += 1
@@ -222,4 +221,4 @@ def process_transaction_file(transaction_file):
 
     except Exception as e:
         logger.exception(f"[{func_name}] Critical failure in transaction parsing.")
-        raise_with_line_info(func_name, e)
+        raise e

@@ -18,7 +18,7 @@ from transaction.invoice_handling import process_transaction_file
 from django.contrib.admin import RelatedOnlyFieldListFilter
 from user.admin import RestrictedAdmin
 
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 # -----------------------------------
@@ -109,7 +109,7 @@ class TransactionAdmin(RestrictedAdmin):
                 logger.debug(f"[{func_name}] Calculated totals by currency: {totals}")
         except Exception as e:
             logger.exception(f"[{func_name}] Error generating totals for transaction list")
-            raise_with_line_info(func_name, e)
+            raise e
         return response
 
     def get_urls(self):
@@ -237,21 +237,21 @@ class TransactionAdmin(RestrictedAdmin):
                 logger.info(f"[{func_name}] {msg_action} {len(created_or_updated)} transactions for user={request.user.email}")
 
                 return redirect("..")
-
-            # GET request: render upload form
-            context = dict(
-                self.admin_site.each_context(request),
-                title="Upload Bill or Transaction File",
-                accounts=Account.objects.filter(created_by=request.user)
-                .select_related("currency")
-                .order_by("name"),
-            )
-            logger.debug(f"[{func_name}] Rendering upload form for {request.user.email}")
-            return render(request, "admin/invoice/upload_bill.html", context)
-
         except Exception as e:
             logger.exception(f"[{func_name}] Error processing upload for {request.user.email}")
-            raise_with_line_info(func_name, e)
+            messages.error(request, "Invalid account selected.")
+            return redirect("..")
+
+        # GET request: render upload form
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Upload Bill or Transaction File",
+            accounts=Account.objects.filter(created_by=request.user)
+            .select_related("currency")
+            .order_by("name"),
+        )
+        logger.debug(f"[{func_name}] Rendering upload form for {request.user.email}")
+        return render(request, "admin/invoice/upload_bill.html", context)
 
     def view_attachment(self, obj):
         if obj.attachment:

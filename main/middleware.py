@@ -1,5 +1,5 @@
 import threading
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 _user = threading.local()
 
@@ -12,7 +12,7 @@ def get_current_user():
         return user
     except Exception as e:
         logger.exception(f"[{func_name}] Failed to get current user")
-        raise_with_line_info(func_name, e)
+        raise e
 
 
 class CurrentUserMiddleware:
@@ -25,7 +25,7 @@ class CurrentUserMiddleware:
             logger.debug(f"[{func_name}] Middleware initialized")
         except Exception as e:
             logger.exception(f"[{func_name}] Initialization failed")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def __call__(self, request):
         func_name = "CurrentUserMiddleware.__call__"
@@ -40,7 +40,7 @@ class CurrentUserMiddleware:
             return response
         except Exception as e:
             logger.exception(f"[{func_name}] Error while processing request")
-            raise_with_line_info(func_name, e)
+            raise e
         finally:
             # Always clear thread-local storage to prevent leakage across requests
             _user.value = None

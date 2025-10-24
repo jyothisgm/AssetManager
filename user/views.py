@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from .models import Role
 from .serializers import UserSerializer, UserCreateSerializer, RoleSerializer
 from .permissions import HasRolePermission
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 User = get_user_model()
 
@@ -21,7 +21,7 @@ class RoleViewSet(viewsets.ModelViewSet):
             return super().list(request, *args, **kwargs)
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching role list for {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def create(self, request, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.create"
@@ -30,7 +30,7 @@ class RoleViewSet(viewsets.ModelViewSet):
             return super().create(request, *args, **kwargs)
         except Exception as e:
             logger.exception(f"[{func_name}] Error creating role by {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -47,7 +47,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return UserSerializer
         except Exception as e:
             logger.exception(f"[{func_name}] Error determining serializer for action '{self.action}'")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def get_queryset(self):
         func_name = f"{self.__class__.__name__}.get_queryset"
@@ -60,7 +60,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return User.objects.filter(id=user.id)
         except Exception as e:
             logger.exception(f"[{func_name}] Error building queryset for {getattr(self.request.user, 'email', None)}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def create(self, request, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.create"
@@ -71,7 +71,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return response
         except Exception as e:
             logger.exception(f"[{func_name}] Error creating user by {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def update(self, request, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.update"
@@ -82,4 +82,4 @@ class UserViewSet(viewsets.ModelViewSet):
             return response
         except Exception as e:
             logger.exception(f"[{func_name}] Error updating user {kwargs.get('pk')} by {request.user.email}")
-            raise_with_line_info(func_name, e)
+            raise e

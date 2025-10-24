@@ -6,7 +6,6 @@ from google.genai import types
 from django.conf import settings
 
 from ai.prompts import PROMPT_GET_INSTITUTION
-from common.helpers import raise_with_line_info
 from main.middleware import get_current_user
 from common.logging_config import logger
 
@@ -32,7 +31,7 @@ def get_gemini_client():
         return genai.Client(api_key=api_key)
     except Exception as e:
         logger.exception("[ai.utils] Failed to initialize Gemini client")
-        raise_with_line_info("get_gemini_client", e)
+        raise e
 
 
 # ---------------------------------------------------------------------
@@ -53,7 +52,7 @@ def call_gemini_api(prompt: str) -> str:
         return result
     except Exception as e:
         logger.exception("[ai.utils] Gemini text API call failed")
-        raise_with_line_info("call_gemini_api", e)
+        raise e
 
 
 # ---------------------------------------------------------------------
@@ -77,7 +76,7 @@ def call_gemini_api_file(file_bytes: bytes, mime_type: str, prompt: str) -> str:
         return result
     except Exception as e:
         logger.exception("[ai.utils] Gemini multimodal API call failed")
-        raise_with_line_info("call_gemini_api_file", e)
+        raise e
 
 
 # ---------------------------------------------------------------------

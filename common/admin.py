@@ -1,6 +1,6 @@
 from django.contrib import admin
 from common.models import Currency, Unit
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 # ------------------------------
@@ -54,4 +54,4 @@ class CurrencyAdmin(admin.ModelAdmin):
             return qs
         except Exception as e:
             logger.exception(f"[{func_name}] Error retrieving currency queryset")
-            raise_with_line_info(func_name, e)
+            raise e

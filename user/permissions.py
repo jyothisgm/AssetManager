@@ -1,5 +1,5 @@
 from rest_framework.permissions import BasePermission
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 class HasRolePermission(BasePermission):
@@ -44,4 +44,4 @@ class HasRolePermission(BasePermission):
 
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking permissions for user={getattr(request.user, 'email', None)}")
-            raise_with_line_info(func_name, e)
+            raise e

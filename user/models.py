@@ -11,7 +11,7 @@ import uuid
 import ai
 from common.models import SoftDeleteManager, SoftDeleteQuerySet, TimeStampedModel
 from main.middleware import get_current_user
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 class UserManager(BaseUserManager):
@@ -31,7 +31,7 @@ class UserManager(BaseUserManager):
             return user
         except Exception as e:
             logger.exception(f"[{func_name}] Error creating user {email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def create_superuser(self, email, password=None, **extra_fields):
         func_name = f"{self.__class__.__name__}.create_superuser"
@@ -42,7 +42,7 @@ class UserManager(BaseUserManager):
             return self.create_user(email, password, **extra_fields)
         except Exception as e:
             logger.exception(f"[{func_name}] Failed to create superuser {email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class Role(models.Model):
@@ -84,7 +84,7 @@ class User(AbstractUser):
             return perms
         except Exception as e:
             logger.exception(f"[{func_name}] Error retrieving permissions for {self.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def has_perm(self, perm, obj=None):
         func_name = f"{self.__class__.__name__}.has_perm"
@@ -98,7 +98,7 @@ class User(AbstractUser):
             return super().has_perm(perm, obj)
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking permission {perm} for {self.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def has_module_perms(self, app_label):
         func_name = f"{self.__class__.__name__}.has_module_perms"
@@ -111,7 +111,7 @@ class User(AbstractUser):
             return super().has_module_perms(app_label)
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking module perms for {app_label} / {self.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def delete(self, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.delete"
@@ -122,7 +122,7 @@ class User(AbstractUser):
             self.save(update_fields=["is_deleted", "is_active"])
         except Exception as e:
             logger.exception(f"[{func_name}] Error soft deleting user {self.email}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class BaseUserQuerySet(SoftDeleteQuerySet):
@@ -136,7 +136,7 @@ class BaseUserQuerySet(SoftDeleteQuerySet):
             return super().create(**kwargs)
         except Exception as e:
             logger.exception(f"[{func_name}] Error during object creation")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class BaseUserManager(SoftDeleteManager.from_queryset(BaseUserQuerySet)):
@@ -168,7 +168,7 @@ class BaseUserModel(TimeStampedModel):
             self.save(update_fields=["is_deleted", "created_by"])
         except Exception as e:
             logger.exception(f"[{func_name}] Error soft deleting object ID={self.id}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def save(self, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.save"
@@ -182,7 +182,7 @@ class BaseUserModel(TimeStampedModel):
             logger.debug(f"[{func_name}] Object saved successfully ID={self.id}")
         except Exception as e:
             logger.exception(f"[{func_name}] Error saving object ID={getattr(self, 'id', None)}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 file_storage = FileSystemStorage(location="media/attachments", base_url="/media/attachments/")

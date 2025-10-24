@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import Role
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 User = get_user_model()
 
@@ -26,7 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
             return super().to_representation(instance)
         except Exception as e:
             logger.exception(f"[{func_name}] Error serializing user {getattr(instance, 'email', None)}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -43,4 +43,4 @@ class UserCreateSerializer(serializers.ModelSerializer):
             return user
         except Exception as e:
             logger.exception(f"[{func_name}] Error creating user with data: {validated_data}")
-            raise_with_line_info(func_name, e)
+            raise e

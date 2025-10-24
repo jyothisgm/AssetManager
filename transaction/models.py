@@ -5,7 +5,7 @@ from common.models import Unit
 from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
 import uuid
 from user.models import BaseUserModel
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 class Transaction(BaseUserModel):
@@ -81,7 +81,7 @@ class Transaction(BaseUserModel):
             return total
         except Exception as e:
             logger.exception(f"[{func_name}] Error computing total_from_items for Transaction ID={self.id}")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def reconcile_amount(self):
         func_name = f"{self.__class__.__name__}.reconcile_amount"
@@ -96,7 +96,7 @@ class Transaction(BaseUserModel):
                 logger.debug(f"[{func_name}] No reconciliation needed for Transaction ID={self.id}")
         except Exception as e:
             logger.exception(f"[{func_name}] Error during reconciliation for Transaction ID={self.id}")
-            raise_with_line_info(func_name, e)
+            raise e
 
 
 class TransactionItem(BaseUserModel):
@@ -128,7 +128,7 @@ class TransactionItem(BaseUserModel):
             logger.debug(f"[{func_name}] TransactionItem saved successfully (ID={self.id})")
         except Exception as e:
             logger.exception(f"[{func_name}] Error saving TransactionItem (product={self.product})")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def delete(self, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.delete"
@@ -138,4 +138,4 @@ class TransactionItem(BaseUserModel):
             logger.debug(f"[{func_name}] TransactionItem ID={self.id} deleted successfully")
         except Exception as e:
             logger.exception(f"[{func_name}] Error deleting TransactionItem ID={self.id}")
-            raise_with_line_info(func_name, e)
+            raise e

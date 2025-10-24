@@ -1,7 +1,7 @@
 from django import forms
 from transaction.models import TransactionItem
 from catalog.models import Brand, PurchaseCategory
-from common.logging_config import logger, raise_with_line_info
+from common.logging_config import logger
 
 
 class TransactionItemInlineForm(forms.ModelForm):
@@ -39,7 +39,7 @@ class TransactionItemInlineForm(forms.ModelForm):
                 logger.debug(f"[{func_name}] Set initial brand={instance.product.brand}, category={cat}")
         except Exception as e:
             logger.exception(f"[{func_name}] Error initializing form for TransactionItem")
-            raise_with_line_info(func_name, e)
+            raise e
 
     def save(self, commit=True):
         func_name = f"{self.__class__.__name__}.save"
@@ -77,4 +77,4 @@ class TransactionItemInlineForm(forms.ModelForm):
             return instance
         except Exception as e:
             logger.exception(f"[{func_name}] Error saving TransactionItem")
-            raise_with_line_info(func_name, e)
+            raise e
