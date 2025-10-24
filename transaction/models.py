@@ -4,8 +4,8 @@ from account.models import Account
 from common.models import Unit
 from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
 import uuid
-
 from user.models import BaseUserModel
+from common.logging_config import logger, raise_with_line_info
 
 
 class Transaction(BaseUserModel):
@@ -22,79 +22,81 @@ class Transaction(BaseUserModel):
     date = models.DateTimeField(default=timezone.now)
     description = models.CharField(max_length=255, blank=True, null=True)
     processed = models.BooleanField(default=False)
-    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, related_name="transactions", null=True, blank=True)
-    
-    # For transfers
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, related_name="transactions", null=True, blank=True
+    )
+
     linked_transaction = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="reverse_transfer"
     )
 
     account = models.ForeignKey(
-        Account,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="transactions",
+        Account, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
 
     category = models.ForeignKey(
-        PurchaseCategory,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="transactions",
+        PurchaseCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
 
     store = models.ForeignKey(
-        Store,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="transactions",
+        Store, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
 
     attachment = models.FileField(
         upload_to="transactions/attachments/",
         blank=True,
         null=True,
-        help_text="Upload a receipt, invoice, or any related file"
+        help_text="Upload a receipt, invoice, or any related file",
     )
 
     notes = models.TextField(blank=True, null=True)
-    
+
     exchange_rate_record = models.ForeignKey(
         ExchangeRateRecord,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="+",
-        help_text="Exchange rate details for this transfer (if applicable)"
+        help_text="Exchange rate details for this transfer (if applicable)",
     )
-    
+
     fee = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="fee_for_transactions",
-        help_text="Link to fee transaction associated with this transaction"
+        help_text="Link to fee transaction associated with this transaction",
     )
 
-
-    # ✅ Generic reverse link (Django auto-creates)
-    # You can now access via `transaction.attachments.all()`
     def __str__(self):
         return f"{self.get_transaction_type_display()} {self.amount} ({self.date.date()})"
 
     @property
     def total_from_items(self):
-        return sum(item.price for item in self.items.all())
+        func_name = f"{self.__class__.__name__}.total_from_items"
+        try:
+            total = sum(item.price for item in self.items.all())
+            logger.debug(f"[{func_name}] Computed total from {self.items.count()} items: {total}")
+            return total
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error computing total_from_items for Transaction ID={self.id}")
+            raise_with_line_info(func_name, e)
 
     def reconcile_amount(self):
-        total = self.total_from_items
-        if total and total != self.amount:
-            self.amount = total
-            self.save(update_fields=["amount"])
+        func_name = f"{self.__class__.__name__}.reconcile_amount"
+        try:
+            total = self.total_from_items
+            if total and total != self.amount:
+                logger.info(f"[{func_name}] Reconciling transaction ID={self.id}: {self.amount} → {total}")
+                self.amount = total
+                self.save(update_fields=["amount"])
+                logger.debug(f"[{func_name}] Updated transaction ID={self.id} with reconciled amount={self.amount}")
+            else:
+                logger.debug(f"[{func_name}] No reconciliation needed for Transaction ID={self.id}")
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error during reconciliation for Transaction ID={self.id}")
+            raise_with_line_info(func_name, e)
 
 
 class TransactionItem(BaseUserModel):
@@ -115,3 +117,25 @@ class TransactionItem(BaseUserModel):
 
     def __str__(self):
         return f"{self.product or 'Item'} ({self.quantity} {self.unit or ''}) - €{self.price}"
+
+    def save(self, *args, **kwargs):
+        func_name = f"{self.__class__.__name__}.save"
+        try:
+            logger.debug(
+                f"[{func_name}] Saving TransactionItem (product={self.product}, price={self.price}, qty={self.quantity})"
+            )
+            super().save(*args, **kwargs)
+            logger.debug(f"[{func_name}] TransactionItem saved successfully (ID={self.id})")
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error saving TransactionItem (product={self.product})")
+            raise_with_line_info(func_name, e)
+
+    def delete(self, *args, **kwargs):
+        func_name = f"{self.__class__.__name__}.delete"
+        try:
+            logger.info(f"[{func_name}] Deleting TransactionItem ID={self.id}")
+            super().delete(*args, **kwargs)
+            logger.debug(f"[{func_name}] TransactionItem ID={self.id} deleted successfully")
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error deleting TransactionItem ID={self.id}")
+            raise_with_line_info(func_name, e)

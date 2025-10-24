@@ -1,93 +1,134 @@
 from catalog.models import Brand, Product, Store
+from common.logging_config import logger
 
 
+# ============================================================
+# STORES
+# ============================================================
 def get_or_create_store(raw_name: str, normalized_name: str | None = None) -> Store | None:
-    """Find or create a Store using both raw and normalized names.
-    - First, try to find store by raw_name.
-    - If not found, find or create preferred store using normalized_name.
-    - Create variant (raw) if it differs from preferred.
+    """
+    Find or create a Store using both raw and normalized names.
     """
     if not raw_name and not normalized_name:
+        logger.warning("[get_or_create_store] Missing both raw_name and normalized_name → returning None")
         return None
 
     normalized_name = normalized_name or raw_name
 
-    # 1️⃣ Try to find existing store with the raw name
-    store = Store.objects.filter(name__iexact=raw_name).first()
-    if store:
-        return store
+    try:
+        # 1️⃣ Try to find existing store with the raw name
+        store = Store.objects.filter(name__iexact=raw_name).first()
+        if store:
+            logger.debug(f"[get_or_create_store] Found existing store '{raw_name}' (id={store.id})")
+            return store
 
-    # 2️⃣ Find or create the preferred store using normalized_name
-    preferred_store = Store.objects.filter(name__iexact=normalized_name).first()
-    if not preferred_store:
-        preferred_store = Store.objects.create(name=normalized_name)
+        # 2️⃣ Find or create the preferred store using normalized_name
+        preferred_store = Store.objects.filter(name__iexact=normalized_name).first()
+        if not preferred_store:
+            preferred_store = Store.objects.create(name=normalized_name)
+            logger.info(f"[get_or_create_store] Created new preferred store '{normalized_name}' (id={preferred_store.id})")
 
-    # 3️⃣ If raw_name differs, create a variant linked to the preferred one
-    if raw_name.lower() != normalized_name.lower():
-        store = Store.objects.create(name=raw_name, preferred=preferred_store)
-        # Optional: maintain reverse link consistency
-        preferred_store.variants.add(store)
-        return store
+        # 3️⃣ Create a variant if raw_name differs
+        if raw_name.lower() != normalized_name.lower():
+            store = Store.objects.create(name=raw_name, preferred=preferred_store)
+            logger.info(f"[get_or_create_store] Created variant store '{raw_name}' → preferred '{normalized_name}'")
+            return store
 
-    # 4️⃣ If same name, just return the preferred
-    return preferred_store
+        # 4️⃣ If same name, just return preferred
+        return preferred_store
+
+    except Exception as e:
+        logger.exception(f"[get_or_create_store] Error creating store for '{raw_name}' → {e}")
+        return None
 
 
-def get_or_create_product_name(raw_name: str, normalized_name: str | None = None, brand_ref=None, unit_ref=None, category=None) -> Product | None:
-    """Find or create an Product using both raw and normalized names."""
+# ============================================================
+# PRODUCTS
+# ============================================================
+def get_or_create_product_name(
+    raw_name: str,
+    normalized_name: str | None = None,
+    brand_ref=None,
+    unit_ref=None,
+    category=None
+) -> Product | None:
+    """
+    Find or create a Product using both raw and normalized names.
+    """
     if not raw_name and not normalized_name:
+        logger.warning("[get_or_create_product_name] Missing both raw_name and normalized_name → returning None")
         return None
 
     normalized_name = normalized_name or raw_name
 
-    # 1️⃣ Try to find existing store with the raw name
-    product = Product.objects.filter(name__iexact=raw_name).first()
-    if product:
-        return product
+    try:
+        # 1️⃣ Find by raw name
+        product = Product.objects.filter(name__iexact=raw_name).first()
+        if product:
+            logger.debug(f"[get_or_create_product_name] Found existing product '{raw_name}' (id={product.id})")
+            return product
 
-    # 2️⃣ Find or create the preferred store using normalized_name
-    preferred_product = Product.objects.filter(name__iexact=normalized_name).first()
-    if not preferred_product:
-        preferred_product = Product.objects.create(name=normalized_name, preferred_unit=unit_ref, category=category)
+        # 2️⃣ Create or reuse preferred product
+        preferred_product = Product.objects.filter(name__iexact=normalized_name).first()
+        if not preferred_product:
+            preferred_product = Product.objects.create(
+                name=normalized_name,
+                preferred_unit=unit_ref,
+                category=category,
+            )
+            logger.info(f"[get_or_create_product_name] Created new preferred product '{normalized_name}' (id={preferred_product.id})")
 
-    # 3️⃣ If raw_name differs, create a variant linked to the preferred one
-    if raw_name.lower() != normalized_name.lower():
-        product = Product.objects.create(name=raw_name, preferred=preferred_product, brand=brand_ref)
-        # Optional: maintain reverse link consistency
-        preferred_product.variants.add(product)
-        return product
+        # 3️⃣ Create variant if raw_name differs
+        if raw_name.lower() != normalized_name.lower():
+            product = Product.objects.create(
+                name=raw_name,
+                preferred=preferred_product,
+                brand=brand_ref,
+            )
+            logger.info(f"[get_or_create_product_name] Created variant product '{raw_name}' → preferred '{normalized_name}'")
+            return product
 
-    # 4️⃣ If same name, just return the preferred
-    return preferred_product
+        return preferred_product
+
+    except Exception as e:
+        logger.exception(f"[get_or_create_product_name] Error creating product for '{raw_name}' → {e}")
+        return None
 
 
+# ============================================================
+# BRANDS
+# ============================================================
 def get_or_create_brand(raw_name: str, normalized_name: str | None = None) -> Brand | None:
-    """Find or create a Brand using both raw and normalized names.
-    - Try to find an existing brand by raw_name.
-    - If not found, find or create a preferred brand using normalized_name.
-    - If names differ, create a variant brand linked to the preferred one.
+    """
+    Find or create a Brand using both raw and normalized names.
     """
     if not raw_name and not normalized_name:
+        logger.warning("[get_or_create_brand] Missing both raw_name and normalized_name → returning None")
         return None
 
     normalized_name = normalized_name or raw_name
 
-    # 1️⃣ Try to find existing brand with the raw name
-    brand = Brand.objects.filter(name__iexact=raw_name).first()
-    if brand:
-        return brand
+    try:
+        # 1️⃣ Try to find existing brand with raw name
+        brand = Brand.objects.filter(name__iexact=raw_name).first()
+        if brand:
+            logger.debug(f"[get_or_create_brand] Found existing brand '{raw_name}' (id={brand.id})")
+            return brand
 
-    # 2️⃣ Find or create the preferred brand using normalized_name
-    preferred_brand = Brand.objects.filter(name__iexact=normalized_name).first()
-    if not preferred_brand:
-        preferred_brand = Brand.objects.create(name=normalized_name)
+        # 2️⃣ Create or reuse preferred brand
+        preferred_brand = Brand.objects.filter(name__iexact=normalized_name).first()
+        if not preferred_brand:
+            preferred_brand = Brand.objects.create(name=normalized_name)
+            logger.info(f"[get_or_create_brand] Created new preferred brand '{normalized_name}' (id={preferred_brand.id})")
 
-    # 3️⃣ If raw_name differs, create a variant linked to the preferred one
-    if raw_name.lower() != normalized_name.lower():
-        brand = Brand.objects.create(name=raw_name, preferred=preferred_brand)
-        # Optional: maintain reverse link consistency
-        preferred_brand.variants.add(brand)
-        return brand
+        # 3️⃣ Create variant if names differ
+        if raw_name.lower() != normalized_name.lower():
+            brand = Brand.objects.create(name=raw_name, preferred=preferred_brand)
+            logger.info(f"[get_or_create_brand] Created variant brand '{raw_name}' → preferred '{normalized_name}'")
+            return brand
 
-    # 4️⃣ If same name, just return the preferred
-    return preferred_brand
+        return preferred_brand
+
+    except Exception as e:
+        logger.exception(f"[get_or_create_brand] Error creating brand for '{raw_name}' → {e}")
+        return None

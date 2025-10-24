@@ -1,5 +1,6 @@
 from django.contrib import admin
 from common.models import Currency, Unit
+from common.logging_config import logger, raise_with_line_info
 
 
 # ------------------------------
@@ -32,19 +33,25 @@ class UnitAdmin(admin.ModelAdmin):
     def variant_count(self, obj):
         return obj.variants.count()
 
+
 # ------------------------------
 # CURRENCY ADMIN
 # ------------------------------
 @admin.register(Currency)
 class CurrencyAdmin(admin.ModelAdmin):
-    list_display = (
-        "code",
-        "name",
-    )
+    list_display = ("code", "name")
     search_fields = ("code", "name", "symbol", "country")
     list_filter = ("type", "is_active", "is_base_currency", "country")
     ordering = ("type", "code")
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related(None)  # keep it lightweight
+        func_name = f"{self.__class__.__name__}.get_queryset"
+        try:
+            logger.debug(f"[{func_name}] Fetching queryset for CurrencyAdmin")
+            qs = super().get_queryset(request)
+            qs = qs.select_related(None)  # keep it lightweight
+            logger.debug(f"[{func_name}] Retrieved {qs.count()} currency records")
+            return qs
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error retrieving currency queryset")
+            raise_with_line_info(func_name, e)
