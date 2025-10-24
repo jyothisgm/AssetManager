@@ -22,18 +22,26 @@
         {% url 'admin:index' as index_url %}
         {% url 'admin:logout' as logout_url %}
         {% if site_url %}
-        <a href="{{ site_url }}">{% trans 'View site' %}</a> |
+            <a href="{{ site_url }}">{% trans 'View site' %}</a> |
         {% endif %}
         <a href="{% url 'admin:user_user_change' user.id %}">{% trans 'Edit profile' %}</a> |
 
-        <a href="{{ logout_url }}">{% trans 'Log out' %}</a>
+        <form id="logout-form" method="post" action="{{ logout_url }}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;">
+                {% trans 'Log out' %}
+            </button>
+        </form>
     {% else %}
         {% if user.is_active %}
-        <a href="{% url 'admin:logout' %}">{% trans 'Log out' %}</a>
+            <form id="logout-form" method="post" action="{% url 'admin:logout' %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;">
+                    {% trans 'Log out' %}
+                </button>
+            </form>
         {% endif %}
     {% endif %}
 {% endblock %}
-
-
 
 {% block nav-global %}{% endblock %}
