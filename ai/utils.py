@@ -10,7 +10,7 @@ from main.middleware import get_current_user
 from common.logging_config import logger
 
 
-MODEL = "gemini-2.0-flash-lite"
+MODEL = "gemini-2.5-flash-lite"
 
 
 # ---------------------------------------------------------------------
@@ -30,7 +30,7 @@ def get_gemini_client():
     try:
         return genai.Client(api_key=api_key)
     except Exception as e:
-        logger.exception("[ai.utils] Failed to initialize Gemini client")
+        logger.warning("[ai.utils] Failed to initialize Gemini client", exc_info=True)
         raise e
 
 
@@ -51,7 +51,7 @@ def call_gemini_api(prompt: str) -> str:
         logger.debug(f"[ai.utils] Gemini text response length={len(result)}")
         return result
     except Exception as e:
-        logger.exception("[ai.utils] Gemini text API call failed")
+        logger.warning("[ai.utils] Gemini text API call failed", exc_info=True)
         raise e
 
 
@@ -75,7 +75,7 @@ def call_gemini_api_file(file_bytes: bytes, mime_type: str, prompt: str) -> str:
         logger.debug(f"[ai.utils] Gemini file response length={len(result)}")
         return result
     except Exception as e:
-        logger.exception("[ai.utils] Gemini multimodal API call failed")
+        logger.warning("[ai.utils] Gemini multimodal API call failed", exc_info=True)
         raise e
 
 
@@ -111,10 +111,10 @@ def get_institution_data(institutions, existing_institutions):
         return ai_lookup
 
     except json.JSONDecodeError as e:
-        logger.warning(f"[ai.utils] Invalid JSON from Gemini: {e}")
+        logger.warning(f"[ai.utils] Invalid JSON from Gemini: {e}", exc_info=True)
         return {}
     except Exception as e:
-        logger.exception("[ai.utils] Gemini institution classification failed")
+        logger.warning("[ai.utils] Gemini institution classification failed", exc_info=True)
         return {}
 
 
@@ -147,5 +147,5 @@ def process_transaction_attachment_type(file_bytes, mime_type, prompt) -> str:
         return result
 
     except Exception as e:
-        logger.exception("[ai.utils] Gemini error during attachment type detection")
-        return "unknown"
+        logger.warning("[ai.utils] Gemini error during attachment type detection", exc_info=True)
+        raise e

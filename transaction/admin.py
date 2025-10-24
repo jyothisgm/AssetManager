@@ -1,3 +1,5 @@
+import mimetypes
+import os
 import uuid
 import sys
 import pytz
@@ -10,6 +12,7 @@ from django.urls import path
 from django.utils import timezone
 from django.utils.html import format_html
 from rangefilter.filters import DateRangeFilter
+from django.contrib.contenttypes.models import ContentType
 
 from account.models import Account
 from transaction.admin_forms import TransactionItemInlineForm
@@ -19,6 +22,7 @@ from django.contrib.admin import RelatedOnlyFieldListFilter
 from user.admin import RestrictedAdmin
 
 from common.logging_config import logger
+from user.models import Attachment
 
 
 # -----------------------------------
@@ -167,7 +171,7 @@ class TransactionAdmin(RestrictedAdmin):
                         else:
                             date_val = date_val.astimezone(browser_tz)
                     except Exception as e:
-                        logger.warning(f"[{func_name}] Could not convert timezone: {e}")
+                        logger.warning(f"[{func_name}] Could not convert timezone: {e}", exc_info=True)
                         date_val = timezone.localtime(date_val)
 
                     preferred_store = store_ref.preferred or store_ref
@@ -212,34 +216,90 @@ class TransactionAdmin(RestrictedAdmin):
                             timestamp = date_val.strftime("%Y%m%d_%H%M%S")
                             extension = uploaded_file.name.split(".")[-1]
                             custom_name = f"{doc_type}_{preferred_store.name}_{timestamp}.{extension}"
-                            transaction.attachment.save(custom_name, uploaded_file, save=True)
+
+                            # Create and save the attachment
+                            attachment = Attachment.objects.create(
+                                created_by=transaction.created_by,
+                                type=doc_type,
+                                description=preferred_store.name,  # will appear in filename
+                                content_type=ContentType.objects.get_for_model(transaction),
+                                object_id=transaction.id,
+                            )
+
+                            # Save the actual file (will trigger upload_to path creation)
+                            attachment.file.save(custom_name, uploaded_file, save=True)
+                            transaction.attachment = attachment
+                            transaction.save(update_fields=["attachment"])
+
                             logger.debug(f"[{func_name}] File attached as {custom_name}")
                         except Exception as e:
-                            logger.warning(f"[{func_name}] Could not attach file: {e}")
+                            logger.warning(f"[{func_name}] Could not attach file: {e}", exc_info=True)
 
                     if existing_tx:
                         transaction.items.all().delete()
                         logger.debug(f"[{func_name}] Cleared old items for transaction {transaction.id}")
 
-                    for item_data in tx_data.get("items", []):
-                        TransactionItem.objects.create(
-                            transaction=transaction,
-                            product=item_data.get("item_ref"),
-                            unit=item_data.get("unit_ref"),
-                            quantity=item_data.get("quantity", 1),
-                            price=item_data.get("price", 0),
-                            date=date_val,
-                        )
+                    # The above code is defining a variable named `total_items_amount` in Python.
+                    total_items_amount = 0
+                    items = tx_data.get("items", None) 
+                    if items:
+                        for item_data in tx_data.get("items", []):
+                            price = item_data.get("price", 0)
+                            quantity = item_data.get("quantity", 1)
+                            line_total = (price or 0) * (quantity or 1)
+                            total_items_amount += line_total
+
+                            TransactionItem.objects.create(
+                                transaction=transaction,
+                                product=item_data.get("item_ref"),
+                                unit=item_data.get("unit_ref"),
+                                quantity=quantity,
+                                price=price,
+                                date=date_val,
+                            )
+                    else:
+                        total_items_amount = float(transaction.amount)
+
+                    # ✅ Added total validation
+                    try:
+                        if round(total_items_amount, 2) != round(float(transaction.amount), 2):
+                            diff = round(total_items_amount - float(transaction.amount), 2)
+                            msg = f"⚠️ Transaction {transaction.id} items total ({total_items_amount}) " \
+                                f"differs from transaction amount ({transaction.amount}) by {diff}."
+                            messages.warning(request, msg)
+                            logger.warning(f"[{func_name}] {msg}")
+                        else:
+                            logger.debug(f"[{func_name}] Transaction {transaction.id} item totals verified successfully.")
+                    except Exception as e:
+                        logger.warning(f"[{func_name}] Could not verify totals for transaction {transaction.id}: {e}", exc_info=True)
+
                     created_or_updated.append(transaction)
 
                 msg_action = "Updated" if any(t for t in created_or_updated if t.id) else "Created"
-                messages.success(request, f"{msg_action} {len(created_or_updated)} transaction(s) from '{doc_type}' document.")
-                logger.info(f"[{func_name}] {msg_action} {len(created_or_updated)} transactions for user={request.user.email}")
+
+                # ✅ Build summary list of store + date
+                summary = []
+                for t in created_or_updated:
+                    store_name = getattr(getattr(t, "store", None), "name", "Unknown Store")
+                    date_str = t.date.strftime("%Y-%m-%d") if getattr(t, "date", None) else "-"
+                    summary.append(f"{store_name} ({date_str})")
+
+                # ✅ Shorten message if too long
+                if len(summary) > 5:
+                    display_summary = ", ".join(summary[:5]) + f", and {len(summary) - 5} more..."
+                else:
+                    display_summary = ", ".join(summary)
+
+                msg = f"{msg_action} {len(created_or_updated)} transaction(s) from '{doc_type}' document: {display_summary}"
+
+                messages.success(request, msg)
+                logger.info(f"[{func_name}] {msg}")
 
                 return redirect("..")
+
         except Exception as e:
             logger.exception(f"[{func_name}] Error processing upload for {request.user.email}")
-            messages.error(request, "Invalid account selected.")
+            messages.error(request, "Exception: " + str(e))
             return redirect("..")
 
         # GET request: render upload form
@@ -254,9 +314,29 @@ class TransactionAdmin(RestrictedAdmin):
         return render(request, "admin/invoice/upload_bill.html", context)
 
     def view_attachment(self, obj):
-        if obj.attachment:
-            return format_html('<img src="{}" style="max-height:150px;"/>', obj.attachment.url)
-        return "-"
+        """
+        Display a preview or a link for the attachment file.
+        - Shows image preview if it's an image.
+        - Shows clickable link for other file types.
+        """
+        if not getattr(obj, "attachment", None):
+            return "-"
+
+        file_field = obj.attachment.file if hasattr(obj.attachment, "file") else None
+        if not file_field or not file_field.url:
+            return "-"
+
+        url = file_field.url
+        mime_type, _ = mimetypes.guess_type(url)
+
+        if mime_type and mime_type.startswith("image"):
+            # ✅ Render image preview
+            return format_html('<img src="{}" style="max-height:150px;border-radius:4px;"/>', url)
+        else:
+            # ✅ Render a simple “View File” link
+            filename = os.path.basename(url)
+            return format_html('<a href="{}" target="_blank">📎 View File ({})</a>', url, filename)
+
     view_attachment.short_description = "Invoice"
 
 

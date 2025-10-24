@@ -38,7 +38,7 @@ def get_or_create_store(raw_name: str, normalized_name: str | None = None) -> St
         return preferred_store
 
     except Exception as e:
-        logger.exception(f"[get_or_create_store] Error creating store for '{raw_name}' → {e}")
+        logger.warning(f"[get_or_create_store] Error creating store for '{raw_name}' → {e}", exc_info=True)
         return None
 
 
@@ -91,7 +91,7 @@ def get_or_create_product_name(
         return preferred_product
 
     except Exception as e:
-        logger.exception(f"[get_or_create_product_name] Error creating product for '{raw_name}' → {e}")
+        logger.warning(f"[get_or_create_product_name] Error creating product for '{raw_name}' → {e}", exc_info=True)
         return None
 
 
@@ -130,5 +130,5 @@ def get_or_create_brand(raw_name: str, normalized_name: str | None = None) -> Br
         return preferred_brand
 
     except Exception as e:
-        logger.exception(f"[get_or_create_brand] Error creating brand for '{raw_name}' → {e}")
+        logger.warning(f"[get_or_create_brand] Error creating brand for '{raw_name}' → {e}", exc_info=True)
         return None

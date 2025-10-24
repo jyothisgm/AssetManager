@@ -42,7 +42,7 @@ def my_profile_view(request):
                 logger.info(f"[{func_name}] Profile updated successfully for user={user.email}")
                 return redirect('admin:my_profile')
             else:
-                logger.warning(f"[{func_name}] Invalid form submission by {user.email} | Errors: {form.errors}")
+                logger.exception(f"[{func_name}] Invalid form submission by {user.email} | Errors: {form.errors}")
 
         context = {
             **admin.site.each_context(request),

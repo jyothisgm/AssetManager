@@ -256,7 +256,7 @@ class Command(BaseCommand):
                                 f"invalid response ({resp.status_code}, {content_type})"
                             )
                     except Exception as e:
-                        logger.warning(f"⚠️ [import_legacy_assets] Could not fetch logo for {inst_name}: {e}")
+                        logger.warning(f"⚠️ [import_legacy_assets] Could not fetch logo for {inst_name}: {e}", exc_info=True)
 
             # ------------------------------------------------------------------
             # 3️⃣ Transactions

@@ -38,7 +38,7 @@ class TransactionItemInlineForm(forms.ModelForm):
                 self.fields["category_display"].initial = cat
                 logger.debug(f"[{func_name}] Set initial brand={instance.product.brand}, category={cat}")
         except Exception as e:
-            logger.exception(f"[{func_name}] Error initializing form for TransactionItem")
+            logger.warning(f"[{func_name}] Error initializing form for TransactionItem", exc_info=True)
             raise e
 
     def save(self, commit=True):
@@ -76,5 +76,5 @@ class TransactionItemInlineForm(forms.ModelForm):
 
             return instance
         except Exception as e:
-            logger.exception(f"[{func_name}] Error saving TransactionItem")
+            logger.warning(f"[{func_name}] Error saving TransactionItem", exc_info=True)
             raise e

@@ -20,7 +20,7 @@ def get_or_create_unit(name: str):
             logger.warning(f"[{func_name}] Unit not found for '{name}'")
         return unit
     except Exception as e:
-        logger.exception(f"[{func_name}] Error retrieving or creating unit for name='{name}'")
+        logger.warning(f"[{func_name}] Error retrieving or creating unit for name='{name}'", exc_info=True)
         raise e
 
 

@@ -43,7 +43,7 @@ class Command(BaseCommand):
                         rates = self.fetch_from_fawaz(date_str, base, quote)
 
             except Exception as e:
-                logger.warning(f"⚠️ [Frankfurter] Exception fetching {base}->{quote} ({date_str}): {e}, using fallback")
+                logger.warning(f"⚠️ [Frankfurter] Exception fetching {base}->{quote} ({date_str}): {e}, using fallback", exc_info=True)
                 rates = self.fetch_from_fawaz(date_str, base, quote)
                 failed += 1
                 continue

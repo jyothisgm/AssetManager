@@ -4,8 +4,48 @@ from account.models import Account
 from common.models import Unit
 from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
 import uuid
-from user.models import BaseUserModel
+from user.models import Attachment, BaseUserModel
 from common.logging_config import logger
+from django.conf import settings
+
+import os
+from datetime import datetime
+
+
+def transaction_attachment_path(instance, filename):
+    """
+    Generates and ensures structured path for uploaded attachments.
+
+    Example result:
+        attachments/42_tony_example_com/transactions/purchase_receipt/20251015_142600_Jumbo.jpeg
+    """
+    # --- User info ---
+    user_email = getattr(instance.created_by, "email", "unknown_user")
+    user_pk = getattr(instance.created_by, "pk", None)
+    safe_user = f"{user_pk}_" if user_pk else ""
+    safe_user += user_email.replace("@", "_at_").replace(".", "_")
+
+    # --- File info ---
+    extension = filename.split(".")[-1]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # --- Document / Store info ---
+    doc_type = getattr(instance, "type", "other")
+    store_name = getattr(getattr(instance, "content_object", None), "store", None)
+    preferred_store = getattr(store_name, "name", "unknown")
+
+    # --- Custom filename ---
+    custom_name = f"{timestamp}_{preferred_store}.{extension}"
+
+    # --- Build relative + absolute paths ---
+    relative_dir = os.path.join(safe_user, "transactions", doc_type)
+    relative_path = os.path.join(relative_dir, custom_name)
+    full_dir = os.path.join(settings.MEDIA_ROOT, "attachments", relative_dir)
+
+    # --- Ensure directory exists ---
+    os.makedirs(full_dir, exist_ok=True)
+
+    return relative_path
 
 
 class Transaction(BaseUserModel):
@@ -42,12 +82,14 @@ class Transaction(BaseUserModel):
         Store, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
 
-    attachment = models.FileField(
-        upload_to="transactions/attachments/",
-        blank=True,
-        null=True,
-        help_text="Upload a receipt, invoice, or any related file",
-    )
+    attachment = models.ForeignKey(
+            Attachment,
+            on_delete=models.SET_NULL,
+            null=True,
+            blank=True,
+            related_name="transactions",
+            help_text="Attachment linked to this transaction (e.g., receipt, invoice, bill).",
+        )
 
     notes = models.TextField(blank=True, null=True)
 

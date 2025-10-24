@@ -45,7 +45,7 @@ def process_transaction_file(transaction_file):
                 with open(transaction_file, "rb") as f:
                     transaction_file_bytes = f.read()
         except Exception as e:
-            logger.exception(f"[{func_name}] Error reading file {transaction_file}")
+            logger.warning(f"[{func_name}] Error reading file {transaction_file}", exc_info=True)
             raise e
 
         mime_type, _ = mimetypes.guess_type(file_name)
@@ -81,7 +81,7 @@ def process_transaction_file(transaction_file):
                     prompt=parsing_prompt + prompt_addition,
                 )
             except Exception as e:
-                logger.exception(f"[{func_name}] Gemini API call failed")
+                logger.warning(f"[{func_name}] Gemini API call failed", exc_info=True)
                 raise e
 
             if raw_text.startswith("```"):
@@ -90,7 +90,7 @@ def process_transaction_file(transaction_file):
             try:
                 data = json.loads(raw_text)
             except json.JSONDecodeError:
-                logger.warning(f"[{func_name}] Invalid JSON returned by Gemini.")
+                logger.warning(f"[{func_name}] Invalid JSON returned by Gemini.", exc_info=True)
                 return {"document_type": doc_type, "transactions": []}
 
             # --- Ensure data is a list ---
@@ -175,7 +175,7 @@ def process_transaction_file(transaction_file):
                             else:
                                 quantity = float(item.get("quantity", 1))
                         except Exception as e:
-                            logger.warning(f"[{func_name}] Unit conversion failed for {raw_name}: {e}")
+                            logger.warning(f"[{func_name}] Unit conversion failed for {raw_name}: {e}", exc_info=True)
                             quantity = float(item.get("quantity", 1))
 
                         parsed_items.append(
@@ -202,7 +202,7 @@ def process_transaction_file(transaction_file):
                     )
 
                 except Exception as e:
-                    logger.exception(f"[{func_name}] Error parsing transaction data: {tx_data}")
+                    logger.warning(f"[{func_name}] Error parsing transaction data: {tx_data}", exc_info=True)
                     raise e
 
             if prompt_addition:
@@ -220,5 +220,5 @@ def process_transaction_file(transaction_file):
         return {"document_type": doc_type, "transactions": parsed_transactions}
 
     except Exception as e:
-        logger.exception(f"[{func_name}] Critical failure in transaction parsing.")
+        logger.warning(f"[{func_name}] Critical failure in transaction parsing.", exc_info=True)
         raise e

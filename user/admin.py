@@ -12,6 +12,16 @@ admin.site.index_title = "Welcome to the Asset Manager Dashboard"
 class RestrictedViewAdmin(admin.ModelAdmin):
     exclude = ("is_deleted", )
 
+    def get_readonly_fields(self, request, obj=None):
+        """
+        Combine subclass readonly_fields with enforced ones.
+        """
+        base_fields = ("id", "created_by")
+        subclass_fields = getattr(self, "readonly_fields", ())
+        # ensure uniqueness while preserving tuple form
+        merged = tuple(sorted(set(subclass_fields + base_fields)))
+        return merged
+
     def save_model(self, request, obj, form, change):
         func_name = f"{self.__class__.__name__}.save_model"
         try:

@@ -2,14 +2,14 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager, Permission
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
-from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
-from django.core.files.storage import FileSystemStorage
 import uuid
+from django.core.files.storage import storages
 
-import ai
+import os
 from common.models import SoftDeleteManager, SoftDeleteQuerySet, TimeStampedModel
+from common.storage import get_dynamic_storage
 from main.middleware import get_current_user
 from common.logging_config import logger
 
@@ -185,14 +185,35 @@ class BaseUserModel(TimeStampedModel):
             raise e
 
 
-file_storage = FileSystemStorage(location="media/attachments", base_url="/media/attachments/")
+def dynamic_attachment_path(instance, filename):
+    from transaction.models import transaction_attachment_path
+    """
+    Calls a model-specific path function based on the parent model.
+    """
+    parent = getattr(instance, "content_object", None)
+    if not parent:
+        # default fallback
+        return f"attachments/unknown/{filename}"
 
+    model_name = parent.__class__.__name__.lower()
 
+    # registry of model → function mapping
+    path_map = {
+        "transaction": transaction_attachment_path,
+        # add more here, e.g.
+        # "account": account_attachment_path,
+    }
+
+    path_func = path_map.get(model_name)
+
+    if path_func:
+        return path_func(instance, filename)
+    else:
+        # fallback generic path
+        return os.path.join("attachments", model_name, filename)
+
+# --- main Attachment model ---
 class Attachment(BaseUserModel):
-    """
-    A generalized attachment that can belong to any object (transaction, income, bill, etc.)
-    Supports image, PDF, email, text, CSV, JSON, or any other type of uploaded file or text.
-    """
     ATTACHMENT_TYPES = [
         ("image", "Image"),
         ("pdf", "PDF"),
@@ -205,15 +226,17 @@ class Attachment(BaseUserModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     type = models.CharField(max_length=20, choices=ATTACHMENT_TYPES, default="other")
+
     file = models.FileField(
-        upload_to="attachments/",
-        storage=file_storage,
+        upload_to=dynamic_attachment_path,
+        storage=get_dynamic_storage(),
         null=True,
         blank=True,
         help_text="Uploaded file (optional).",
     )
-    text_content = models.TextField(blank=True, null=True, help_text="Raw text or parsed content.")
-    source_url = models.URLField(blank=True, null=True, help_text="Optional source URL (e.g., web receipt or email link).")
+
+    text_content = models.TextField(blank=True, null=True)
+    source_url = models.URLField(blank=True, null=True)
     description = models.CharField(max_length=255, blank=True, null=True)
 
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
