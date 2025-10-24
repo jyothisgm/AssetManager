@@ -1,10 +1,11 @@
 from django.contrib import admin
 
-from catalog.models import CategoryGroup, Currency, ExchangeRateRecord, Institution, Product, PurchaseCategory, Brand, Store
+from catalog.models import CategoryGroup, ExchangeRateRecord, Institution, Product, PurchaseCategory, Brand, Store
+from user.admin import RestrictedAdmin, RestrictedViewAdmin
 
 # Register your models here.
 @admin.register(CategoryGroup)
-class CategoryGroupAdmin(admin.ModelAdmin):
+class CategoryGroupAdmin(RestrictedViewAdmin):
     list_display = ("name", "category_count", "created_at", "modified_at")
     search_fields = ("name",)
 
@@ -14,7 +15,7 @@ class CategoryGroupAdmin(admin.ModelAdmin):
 
 
 @admin.register(PurchaseCategory)
-class PurchaseCategoryAdmin(admin.ModelAdmin):
+class PurchaseCategoryAdmin(RestrictedViewAdmin):
     list_display = (
         "name",
         "group",
@@ -26,14 +27,14 @@ class PurchaseCategoryAdmin(admin.ModelAdmin):
 
 
 @admin.register(Brand)
-class BrandAdmin(admin.ModelAdmin):
+class BrandAdmin(RestrictedViewAdmin):
     list_display = ("name", "preferred", "created_at")
     search_fields = ("name",)
     ordering = ("name",)
 
 @admin.register(Store)
-class StoreAdmin(admin.ModelAdmin):
-    list_display = ("name", "preferred_name", "category_names", "variant_count", "created_at", "modified_at")
+class StoreAdmin(RestrictedViewAdmin):
+    list_display = ("name", "preferred_name", "category_names", "variant_count", "created_at", "modified_at", 'created_by')
     search_fields = ("name",)
 
     def preferred_name(self, obj):
@@ -57,7 +58,7 @@ class StoreAdmin(admin.ModelAdmin):
 # ITEM NAME ADMIN
 # ------------------------------
 @admin.register(Product)
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(RestrictedViewAdmin):
     list_display = (
         "name",
         "preferred_display",
@@ -110,7 +111,7 @@ class ProductAdmin(admin.ModelAdmin):
 # INSTITUTION ADMIN
 # ------------------------------
 @admin.register(Institution)
-class InstitutionAdmin(admin.ModelAdmin):
+class InstitutionAdmin(RestrictedViewAdmin):
     list_display = (
         "name",
         "short_name",
@@ -129,38 +130,11 @@ class InstitutionAdmin(admin.ModelAdmin):
         return obj.preferred.name if obj.preferred else "-"
     preferred_display.short_description = "Canonical Institution"
 
-
-# ------------------------------
-# CURRENCY ADMIN
-# ------------------------------
-@admin.register(Currency)
-class CurrencyAdmin(admin.ModelAdmin):
-    list_display = (
-        "code",
-        "name",
-        "symbol",
-        "type",
-        "country",
-        "rate_to_base",
-        "is_base_currency",
-        "is_active",
-        "created_at",
-    )
-    search_fields = ("code", "name", "symbol", "country")
-    list_filter = ("type", "is_active", "is_base_currency", "country")
-    ordering = ("type", "code")
-    list_editable = ("rate_to_base", "is_active", "is_base_currency")
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.select_related(None)  # keep it lightweight
-
-
 # ------------------------------
 # EXCHANGE RATE RECORD ADMIN
 # ------------------------------
 @admin.register(ExchangeRateRecord)
-class ExchangeRateRecordAdmin(admin.ModelAdmin):
+class ExchangeRateRecordAdmin(RestrictedAdmin):
     list_display = (
         "date",
         "currency_exchange_display",

@@ -18,6 +18,7 @@ from catalog.models import (
 )
 from common.models import Unit
 from transaction.models import Transaction, TransactionItem
+from user.models import User
 
 
 class Command(BaseCommand):
@@ -62,9 +63,10 @@ class Command(BaseCommand):
         }
         qty_pattern = re.compile(r"(?P<value>\d*\.?\d+)\s*(?P<unit>[a-zA-Z]+)?", re.I)
 
+        user = User.objects.get(email="kichujyothis@gmail.com")
         # Ensure Grocery category exists
         group, _ = CategoryGroup.objects.get_or_create(name="Household")
-        grocery_cat, _ = PurchaseCategory.objects.get_or_create(name="Grocery", group=group)
+        grocery_cat, _ = PurchaseCategory.objects.get_or_create(name="Grocery", group=group, defaults={"created_by": user,})
 
         # Default currency
         currency = Currency.objects.filter(is_base_currency=True).first()
@@ -104,7 +106,7 @@ class Command(BaseCommand):
             # Find store (or its preferred)
             store_ref = Store.objects.filter(name__iexact=store_name).first()
             if not store_ref:
-                store_ref, _ = Store.objects.get_or_create(name=store_name)
+                store_ref, _ = Store.objects.get_or_create(name=store_name, defaults={"created_by": user,})
                 store_ref.categories.add(grocery_cat)
                 store_ref.save()
 
@@ -199,7 +201,7 @@ class Command(BaseCommand):
 
                 product_ref, _ = Product.objects.get_or_create(
                     name=product_name,
-                    defaults={"category": grocery_cat, "preferred_unit": unit_ref},
+                    defaults={"category": grocery_cat, "preferred_unit": unit_ref, "created_by": user},
                 )
                 if not product_ref.category:
                     product_ref.category = grocery_cat
@@ -214,6 +216,8 @@ class Command(BaseCommand):
                     quantity=quantity,
                     unit=unit_ref,
                     price=price,
+                    created_by=user,
+                    date=matched_tx.date
                 )
                 new_item_count += 1
                 updated_items += 1

@@ -1,12 +1,14 @@
 from django.db import models
 from django.utils import timezone
 from account.models import Account
-from common.models import TimeStampedModel, Unit
-from catalog.models import Currency, ExchangeRateRecord, Store, Product, Brand, PurchaseCategory
+from common.models import Unit
+from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
 import uuid
 
+from user.models import BaseUserModel
 
-class Transaction(TimeStampedModel):
+
+class Transaction(BaseUserModel):
     TRANSACTION_TYPES = [
         ("debit", "Debit"),
         ("credit", "Credit"),
@@ -81,7 +83,6 @@ class Transaction(TimeStampedModel):
 
     # ✅ Generic reverse link (Django auto-creates)
     # You can now access via `transaction.attachments.all()`
-
     def __str__(self):
         return f"{self.get_transaction_type_display()} {self.amount} ({self.date.date()})"
 
@@ -96,8 +97,7 @@ class Transaction(TimeStampedModel):
             self.save(update_fields=["amount"])
 
 
-
-class TransactionItem(TimeStampedModel):
+class TransactionItem(BaseUserModel):
     transaction = models.ForeignKey(
         Transaction,
         related_name="items",
@@ -111,6 +111,7 @@ class TransactionItem(TimeStampedModel):
     quantity = models.FloatField(default=1)
     unit = models.ForeignKey(Unit, on_delete=models.SET_NULL, null=True, blank=True)
     price = models.FloatField(default=0)
+    date = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return f"{self.product or 'Item'} ({self.quantity} {self.unit or ''}) - €{self.price}"

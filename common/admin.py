@@ -1,5 +1,5 @@
 from django.contrib import admin
-from common.models import Unit, Attachment
+from common.models import Currency, Unit
 
 
 # ------------------------------
@@ -32,43 +32,19 @@ class UnitAdmin(admin.ModelAdmin):
     def variant_count(self, obj):
         return obj.variants.count()
 
-
 # ------------------------------
-# ATTACHMENT ADMIN
+# CURRENCY ADMIN
 # ------------------------------
-@admin.register(Attachment)
-class AttachmentAdmin(admin.ModelAdmin):
+@admin.register(Currency)
+class CurrencyAdmin(admin.ModelAdmin):
     list_display = (
-        "id",
-        "type",
-        "description",
-        "content_type",
-        "object_id",
-        "source_url",
-        "created_at",
+        "code",
+        "name",
     )
-    list_filter = ("type", "content_type")
-    search_fields = ("description", "source_url", "text_content")
-    readonly_fields = ("created_at", "modified_at")
+    search_fields = ("code", "name", "symbol", "country")
+    list_filter = ("type", "is_active", "is_base_currency", "country")
+    ordering = ("type", "code")
 
-    fieldsets = (
-        ("Basic Info", {
-            "fields": ("id", "type", "description", "file", "text_content", "source_url")
-        }),
-        ("Linked Object", {
-            "fields": ("content_type", "object_id")
-        }),
-        ("Timestamps", {
-            "fields": ("created_at", "modified_at"),
-        }),
-    )
-
-    def has_add_permission(self, request):
-        # usually attachments are created via API or inline, not from admin
-        return True
-
-    def has_change_permission(self, request, obj=None):
-        return True
-
-    def has_delete_permission(self, request, obj=None):
-        return True
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related(None)  # keep it lightweight

@@ -1,18 +1,54 @@
 from django.db import models
 
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.core.files.storage import FileSystemStorage
+class SoftDeleteQuerySet(models.QuerySet):
+    def create(self, **kwargs):
+        """
+        If an object with same unique constraints exists and is soft-deleted,
+        un-delete it instead of creating a duplicate.
+        """
+        model = self.model
+        unique_fields = [
+            f.name for f in model._meta.fields if f.unique and f.name != "id"
+        ]
+        filters = {f: kwargs[f] for f in unique_fields if f in kwargs}
 
-import uuid
+        if filters:
+            existing = model.all_objects.filter(**filters).first()
+            if existing and existing.is_deleted:
+                existing.is_deleted = False
+                for key, value in kwargs.items():
+                    setattr(existing, key, value)
+                existing.save()
+                print("♻️ Restored soft-deleted object:", existing)
+                return existing
+        return super().create(**kwargs)
+
+
+class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
 
 
 # ---------- Base ----------
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
+
     class Meta:
         abstract = True
+
+    objects = SoftDeleteManager()
+    all_objects = models.Manager()  # to access even deleted
+    
+    def delete(self, *args, **kwargs):
+        """Soft delete — just mark as deleted"""
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted"])
+
+    def hard_delete(self, *args, **kwargs):
+        """Actual delete if ever needed"""
+        super().delete(*args, **kwargs)
 
 
 # ---------- Units ----------
@@ -44,41 +80,32 @@ class Unit(TimeStampedModel):
         return label + base
 
 
-file_storage = FileSystemStorage(location="media/attachments", base_url="/media/attachments/")
-class Attachment(TimeStampedModel):
+class Currency(TimeStampedModel):
     """
-    A generalized attachment that can belong to any object (transaction, income, bill, etc.)
-    Supports image, PDF, email, text, CSV, JSON, or any other type of uploaded file or text.
+    ISO-based and crypto-compatible currency model for accounts, transactions, and analytics.
     """
-    ATTACHMENT_TYPES = [
-        ("image", "Image"),
-        ("pdf", "PDF"),
-        ("email", "Email"),
-        ("text", "Text"),
-        ("csv", "CSV"),
-        ("json", "JSON"),
-        ("other", "Other"),
+    CURRENCY_TYPES = [
+        ("fiat", "Fiat Currency"),
+        ("crypto", "Cryptocurrency"),
     ]
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    type = models.CharField(max_length=20, choices=ATTACHMENT_TYPES, default="other")
-
-    file = models.FileField(
-        upload_to="attachments/",
-        storage=file_storage,
-        null=True,
-        blank=True,
-        help_text="Uploaded file (optional).",
+    code = models.CharField(max_length=10, unique=True, help_text="Currency code (ISO 4217 or symbol like BTC)")
+    name = models.CharField(max_length=64)
+    symbol = models.CharField(max_length=8, blank=True, null=True)
+    type = models.CharField(max_length=10, choices=CURRENCY_TYPES, default="fiat")
+    country = models.CharField(max_length=64, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    rate_to_base = models.DecimalField(
+        max_digits=18, decimal_places=8, default=1, help_text="Conversion rate to system base currency."
     )
-    text_content = models.TextField(blank=True, null=True, help_text="Raw text or parsed content.")
-    source_url = models.URLField(blank=True, null=True, help_text="Optional source URL (e.g., web receipt or email link).")
-    description = models.CharField(max_length=255, blank=True, null=True)
+    is_base_currency = models.BooleanField(default=False, help_text="Only one should be base.")
 
-    # 🔗 Generic relation to link with any model
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.UUIDField()
-    content_object = GenericForeignKey("content_type", "object_id")
+    class Meta:
+        ordering = ["type", "code"]
 
     def __str__(self):
-        return self.description or f"{self.type.capitalize()} ({self.id})"
+        t = "₿" if self.type == "crypto" else ""
+        return f"{self.code} {t}".strip()
 
+    def canonical(self):
+        return self

@@ -1,8 +1,10 @@
 # account/models.py
 from django.db import models
-from common.models import TimeStampedModel
 from catalog.models import Institution, Currency
 from django.db.models import Sum, Case, When, F, DecimalField
+
+from common.models import TimeStampedModel
+from user.models import BaseUserModel
 
 
 class AccountType(TimeStampedModel):
@@ -32,7 +34,7 @@ class AccountType(TimeStampedModel):
         return f"{self.name} ({self.group})"
 
 
-class Account(TimeStampedModel):
+class Account(BaseUserModel):
     name = models.CharField(max_length=100)
     account_type = models.ForeignKey(AccountType, on_delete=models.PROTECT, related_name="account")
     institution = models.ForeignKey(
@@ -49,7 +51,7 @@ class Account(TimeStampedModel):
         null=True,
         help_text="Currency of this account’s balance."
     )
-    balance = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # balance = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):

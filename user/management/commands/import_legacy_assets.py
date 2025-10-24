@@ -10,10 +10,13 @@ from django.core.files.base import ContentFile
 
 from django.utils import timezone
 from account.models import Account, AccountType
+from ai.utils import get_institution_data
 from transaction.models import Transaction
 from catalog.models import Currency, ExchangeRateRecord, PurchaseCategory, Store, Institution
 from google import genai
 from django.conf import settings
+
+from user.models import User
 
 
 client = genai.Client(api_key=settings.GEMINI_KEY)
@@ -104,6 +107,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Assets: {assets_path}")
         self.stdout.write(f"Transactions: {transactions_path}")
         self.stdout.write(f"Categories: {categories_path}")
+    
+        user = User.objects.get(email="kichujyothis@gmail.com")
 
         # Load JSON
         try:
@@ -131,7 +136,7 @@ class Command(BaseCommand):
         # ------------------------------------------------------------------
         uid_to_type = {}
         fallback_type, _ = AccountType.objects.get_or_create(
-            name="Others", defaults={"code": "others", "description": "Fallback"}
+            name="Others", defaults={"code": "others", "description": "Fallback"},
         )
 
         for group in assetgroups:
@@ -176,6 +181,7 @@ class Command(BaseCommand):
                 defaults={
                     "account_type": account_type,
                     "currency": currency,
+                    "created_by": user,
                 },
             )
             uid_to_account[uid] = acc
@@ -189,44 +195,7 @@ class Command(BaseCommand):
 
         # --- collect all unique institution names ---
         inst_names = sorted({acc.name.strip() for acc in uid_to_account.values() if acc.name.strip()})
-
-        # --- build one big prompt ---
-        prompt = f"""
-            You are classifying financial or commercial institutions.
-            Return a JSON list of objects, one per institution name, using this format:
-            [
-            {{
-                "input": "Institution name",
-                "short_name": "short form (e.g., HDFC, SBI, Amex)",
-                "type": "one of ['bank','credit_card','broker','insurance','fintech','other']",
-                "country": "Country or 'Unknown'",
-                "website": "Official website URL if known, else null",
-                "logo": "Official logo image URL (SVG/PNG) if available, else null like https://upload.wikimedia.org/wikipedia/commons/7/73/Revolut_logo.svg"
-            }}
-            ]
-            Ignore cash as an institution.
-            Make sure the logo URLs point directly to image files. Usually you are returning invalid logo URLs
-            Institution names to classify:
-            {json.dumps(inst_names, indent=2)}
-        """
-
-        # --- send to Gemini once ---
-        try:
-            response = client.models.generate_content(
-                model="models/gemini-2.5-flash",  # confirm with client.models.list()
-                contents=[{"role": "user", "parts": [{"text": prompt}]}],
-            )
-
-            raw = response.text.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").replace("json", "").strip()
-            ai_data = json.loads(raw)
-            ai_lookup = {i["input"].strip(): i for i in ai_data if "input" in i}
-            self.stdout.write(f"✅ Gemini returned {len(ai_lookup)} institution entries")
-
-        except Exception as e:
-            self.stdout.write(f"⚠️ Gemini batch inference failed: {e}")
-            ai_lookup = {}
+        ai_lookup = get_institution_data(inst_names, [])
 
         # --- process each account ---
         for acc in uid_to_account.values():
@@ -235,6 +204,7 @@ class Command(BaseCommand):
                 continue
 
             ai_info = ai_lookup.get(inst_name, {})
+            name = ai_info.get("name", inst_name)
             short_name = ai_info.get("short_name", inst_name[:50])
             if inst_name.lower() == "cash":
                 continue
@@ -244,12 +214,14 @@ class Command(BaseCommand):
             logo_url = ai_info.get("logo")
 
             inst, _ = Institution.objects.get_or_create(
-                name=short_name,
+                short_name=short_name,
                 defaults={
-                    "short_name": short_name,
+                    "name": name,
                     "type": itype,
                     "country": country,
                     "website": website,
+                    "created_by": user,
+                    "is_deleted": True,
                 },
             )
 
@@ -337,14 +309,14 @@ class Command(BaseCommand):
                         if cat_name in category_alias_map:
                             cat_ref = PurchaseCategory.objects.filter(name__icontains=category_alias_map[cat_name]).first()
                         else:
-                            print("✅ Mapped category:", cat_name, "→", cat_ref)
+                            print("❌ No category:", cat_name)
                             print("Transaction data:", tx)
 
                 # store/shop
                 content = tx.get("ZCONTENT") or tx.get("store")
                 store_ref = None
                 if content:
-                    store_ref, _ = Store.objects.get_or_create(name=content.strip())
+                    store_ref, _ = Store.objects.get_or_create(name=content.strip(), defaults={"created_by": user,})
                     store_ref.categories.add(cat_ref) if cat_ref else None
                     store_ref.save()
                 
@@ -415,53 +387,54 @@ class Command(BaseCommand):
                         currency_code = currency_codes[1].upper().strip()
 
                         provider_rate = float(tx.get("AMOUNT_ACCOUNT")) / float(tx.get("ZMONEY")) if float(tx.get("ZMONEY")) != 0 else 1
-
-                        if exchange_rate_record:
-                            if any(value is not None for value in (exchange_rate_record['base_currency'], exchange_rate_record['quote_currency'], exchange_rate_record['provider_rate'])):
-                                if exchange_rate_record['tx_fee_uid'] != tx_fee_uid:
-                                    print("❌ Wrong Fee ID", )
-                                if exchange_rate_record['base_currency'] != currency_codes[1].upper().strip():
-                                    print("❌ Base Currency is Wrong")
-                                if exchange_rate_record['quote_currency'] != currency_codes[0].upper().strip():
-                                    print("❌ Quote Currency is Wrong")
-                                if exchange_rate_record['provider_rate'] != provider_rate:
-                                    print(f"❌ Wrong Provider Rate {exchange_rate_record['provider_rate']} != {provider_rate}")
-                                    print(f"❌ Wrong Provider Rate {exchange_rate_record['base_amount']} != {tx.get("AMOUNT_ACCOUNT")}  {exchange_rate_record['quote_amount']} != {float(tx.get("ZMONEY"))}")
-                                    print(f"❌ 2. {tx_trans_uid}")
-                            exchange_rate_record.update({
-                                'base_currency': currency_codes[1].upper().strip(),
-                                'quote_currency': currency_codes[0].upper().strip(),
-                                'provider_rate': provider_rate,
-                                'base_amount': float(tx.get("IN_ZMONEY")),
-                                'quote_amount': float(tx.get("ZMONEY"))
-                            })
+                        
+                        if tx_fee_uid and not tx_trans_uid:
+                            if exchange_rate_record:
+                                exchange_rate_record['tx_fee_uid'] = tx_fee_uid
+                                exchange_rate_record['fee'] = float(tx.get("AMOUNT_ACCOUNT"))
+                            else:
+                                exchange_rate_record = {
+                                    'base_currency': None,
+                                    'quote_currency': None,
+                                    'provider_rate': None,
+                                    'tx_fee_uid': tx_fee_uid,
+                                    'fee': float(tx.get("AMOUNT_ACCOUNT")),
+                                    'tx' : [],
+                                    'base_amount': None,
+                                    'quote_amount': None
+                                }
                         else:
-                            exchange_rate_record = {
-                                'base_currency': currency_codes[1].upper().strip(),
-                                'quote_currency': currency_codes[0].upper().strip(),
-                                'provider_rate': provider_rate,
-                                'tx_fee_uid': tx_fee_uid,
-                                'fee': 0,
-                                'tx' : [],
-                                'base_amount': float(tx.get("IN_ZMONEY")),
-                                'quote_amount': float(tx.get("ZMONEY"))
-                            }
-                    
-                    if tx_fee_uid and not tx_trans_uid:
-                        if exchange_rate_record:
-                            exchange_rate_record['tx_fee_uid'] = tx_fee_uid
-                            exchange_rate_record['fee'] = float(tx.get("AMOUNT_ACCOUNT"))
-                        else:
-                            exchange_rate_record = {
-                                'base_currency': None,
-                                'quote_currency': None,
-                                'provider_rate': None,
-                                'tx_fee_uid': tx_fee_uid,
-                                'fee': float(tx.get("AMOUNT_ACCOUNT")),
-                                'tx' : [],
-                                'base_amount': None,
-                                'quote_amount': None
-                            }
+                            if exchange_rate_record:
+                                if any(value is not None for value in (exchange_rate_record['base_currency'], exchange_rate_record['quote_currency'], exchange_rate_record['provider_rate'])):
+                                    if exchange_rate_record['tx_fee_uid'] != tx_fee_uid:
+                                        print("❌ Wrong Fee ID", )
+                                    if exchange_rate_record['base_currency'] != currency_codes[1].upper().strip():
+                                        print("❌ Base Currency is Wrong")
+                                    if exchange_rate_record['quote_currency'] != currency_codes[0].upper().strip():
+                                        print("❌ Quote Currency is Wrong")
+                                    if exchange_rate_record['provider_rate'] != provider_rate:
+                                        print(f"❌ Wrong Provider Rate {exchange_rate_record['provider_rate']} != {provider_rate}")
+                                        print(f"❌ Wrong Provider Rate {exchange_rate_record['base_amount']} != {tx.get("AMOUNT_ACCOUNT")}  {exchange_rate_record['quote_amount']} != {float(tx.get("ZMONEY"))}")
+                                        print(f"❌ 2. {tx_trans_uid}")
+                                        print("❌: ", exchange_rate_record)
+                                exchange_rate_record.update({
+                                    'base_currency': currency_codes[1].upper().strip(),
+                                    'quote_currency': currency_codes[0].upper().strip(),
+                                    'provider_rate': provider_rate,
+                                    'base_amount': float(tx.get("IN_ZMONEY")),
+                                    'quote_amount': float(tx.get("ZMONEY"))
+                                })
+                            else:
+                                exchange_rate_record = {
+                                    'base_currency': currency_codes[1].upper().strip(),
+                                    'quote_currency': currency_codes[0].upper().strip(),
+                                    'provider_rate': provider_rate,
+                                    'tx_fee_uid': tx_fee_uid,
+                                    'fee': 0,
+                                    'tx' : [],
+                                    'base_amount': float(tx.get("IN_ZMONEY")),
+                                    'quote_amount': float(tx.get("ZMONEY"))
+                                }
 
                 new_tx = Transaction.objects.create(
                     transaction_type=ttype,
@@ -473,6 +446,7 @@ class Command(BaseCommand):
                     category=cat_ref,
                     currency=Currency.objects.get(code=currency_code),
                     processed=True,
+                    created_by=user,
                 )
                 
                 if exchange_rate_record:
@@ -486,7 +460,7 @@ class Command(BaseCommand):
                             quote_currency = Currency.objects.get(code=quote_code)
                             provider = None
                             if store_ref:
-                                provider, _ = Institution.objects.get_or_create(name=acc_ref.name)
+                                provider, _ = Institution.objects.get_or_create(short_name__iexact=acc_ref.name.strip(), defaults={"created_by": user,})
 
                             exch = ExchangeRateRecord.objects.create(
                                 base_currency=base_currency,
@@ -494,7 +468,8 @@ class Command(BaseCommand):
                                 provider_rate=Decimal(str(provider_rate)),
                                 provider=provider,
                                 fee_percent=Decimal(str(round(exchange_rate_record.get('fee', 0), 3))),
-                                date = new_tx.date
+                                date = new_tx.date,
+                                created_by=user
                             )
                             new_tx.exchange_rate_record = exch
                             new_tx.save()
@@ -522,16 +497,16 @@ class Command(BaseCommand):
 
                 created += 1
 
-                if tx_uid_trans == "8433d64f-09ce-460e-84cc-7f95dc1facea" and conversion_map.get('8433d64f-09ce-460e-84cc-7f95dc1facea', None):
-                    print(conversion_map.get('8433d64f-09ce-460e-84cc-7f95dc1facea'))
+                # if tx_uid_trans == "8433d64f-09ce-460e-84cc-7f95dc1facea" and conversion_map.get('8433d64f-09ce-460e-84cc-7f95dc1facea', None):
+                #     print(conversion_map.get('8433d64f-09ce-460e-84cc-7f95dc1facea'))
                     
-                if tx_fee_uid == "0c9747db-1e96-4b70-bb04-fdbb69983581" and conversion_fees_map.get('0c9747db-1e96-4b70-bb04-fdbb69983581', None):
-                    print(conversion_fees_map.get('0c9747db-1e96-4b70-bb04-fdbb69983581'))
+                # if tx_fee_uid == "0c9747db-1e96-4b70-bb04-fdbb69983581" and conversion_fees_map.get('0c9747db-1e96-4b70-bb04-fdbb69983581', None):
+                #     print(conversion_fees_map.get('0c9747db-1e96-4b70-bb04-fdbb69983581'))
 
             except Exception as e:
                 tb = sys.exc_info()[2]
                 line_number = tb.tb_lineno
-                self.stdout.write(f"⚠️ Skipping transaction ({tx.get('AID')}): {e} (line {line_number})")
+                self.stdout.write(f"❌ Skipping transaction ({tx.get('AID')}): {e} (line {line_number})")
 
         # # ------------------------------------------------------------------
         # # 4️⃣ Link transfer transactions (by txUidTrans)
@@ -567,7 +542,7 @@ class Command(BaseCommand):
                 quote_amount = record_data.get("quote_amount") or 0
 
                 if not (base_code and quote_code):
-                    self.stdout.write(f"⚠️ Skipping ExchangeRateRecord {key}: missing currencies")
+                    self.stdout.write(f"❌ Skipping ExchangeRateRecord {key}: missing currencies")
                     continue
 
                 base_currency = Currency.objects.get(code=base_code)
@@ -577,9 +552,9 @@ class Command(BaseCommand):
                 # pick provider from store of first transaction if any
                 first_tx = record_data["tx"][0] if record_data["tx"] else None
                 if first_tx and first_tx.store:
-                    provider, _ = Institution.objects.get_or_create(name=first_tx.store.name)
+                    provider, _ = Institution.objects.get_or_create(short_name__iexact=first_tx.store.name, defaults={'short_name':first_tx.store.name.strip(), "created_by": user,})
                 elif tx_fee and tx_fee.store:
-                    provider, _ = Institution.objects.get_or_create(name=tx_fee.store.name)
+                    provider, _ = Institution.objects.get_or_create(short_name__iexact=tx_fee.store.name, defaults={'short_name':tx_fee.store.name.strip(), "created_by": user,})
 
                 # compute fee %
                 try:
@@ -593,6 +568,7 @@ class Command(BaseCommand):
                     provider_rate=Decimal(str(provider_rate)),
                     provider=provider,
                     fee_percent=Decimal(str(round(fee_percent, 3))),
+                    created_by=user,
                 )
 
                 # Link to transactions

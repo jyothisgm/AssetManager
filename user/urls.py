@@ -1,11 +1,6 @@
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from .views import UserViewSet, RoleViewSet
-
-router = DefaultRouter()
-router.register("users", UserViewSet)
-router.register("roles", RoleViewSet)
+from django.urls import path
+from user import admin_views
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path('admin/my-profile/', admin_views.my_profile_view, name='my_profile'),
 ]

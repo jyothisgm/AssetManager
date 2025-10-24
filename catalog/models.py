@@ -1,15 +1,103 @@
 from django.db import models
-from common.models import TimeStampedModel
+import ai
+from common.models import Currency
 from django.utils import timezone
 
+from user.models import BaseUserManager, BaseUserQuerySet, BaseUserModel
+
+
+class InstitutionQuerySet(BaseUserQuerySet):
+    def create(self, **kwargs):
+        """
+        Shared creation logic that runs for .create(), .get_or_create(),
+        and .update_or_create().
+        """
+        # Extract flags and normalize name
+        ai_checked = kwargs.pop("is_deleted", None)
+        short_name = kwargs.get("short_name", "").strip()
+
+        # Skip AI processing if already marked or empty
+        if not ai_checked and short_name:
+            print("⚠️ Reached AI Check: ", kwargs)
+
+            existing_institutions = self.model.objects.values_list("name", flat=True)
+            try:
+                ai_lookup = ai.utils.get_institution_data([short_name], existing_institutions)
+            except Exception as e:
+                print("❌ AI lookup failed:", e)
+                ai_lookup = {}
+
+            ai_info = ai_lookup.get(short_name, {})
+
+            # Skip creating cash institution
+            if short_name.lower() == "cash":
+                print("⚠️ Skipping 'cash' institution")
+                return None
+
+            # Fill AI-enriched info
+            kwargs["name"] = ai_info.get("name", short_name[:50]).title()
+            kwargs["short_name"] = ai_info.get("short_name", short_name[:50]).title()
+            kwargs["type"] = ai_info.get("type", "other").lower()
+            kwargs["country"] = ai_info.get("country", "Unknown")
+            kwargs["website"] = ai_info.get("website")
+            print(kwargs)
+            instance = self.filter(short_name__iexact=kwargs["short_name"]).first()
+            if instance:
+                return instance
+        return super().create(**kwargs)
+
+
+class InstitutionManager(BaseUserManager.from_queryset(InstitutionQuerySet)):
+    """Attach the custom queryset logic to the manager."""
+    pass
+
+
+# ---------- Institution ----------
+class Institution(BaseUserModel):
+    """
+    Represents a financial or commercial institution such as a bank,
+    credit card company, investment platform, or insurance provider.
+    """
+
+    name = models.CharField(max_length=100)
+    short_name = models.CharField(max_length=50, unique=True)
+    type = models.CharField(
+        max_length=30,
+        choices=[
+            ("bank", "Bank"),
+            ("credit_card", "Credit Card Issuer"),
+            ("broker", "Investment / Brokerage"),
+            ("insurance", "Insurance"),
+            ("fintech", "Fintech / Wallet"),
+            ("other", "Other"),
+        ],
+        default="bank",
+    )
+    country = models.CharField(max_length=50, blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+    logo = models.ImageField(upload_to="institutions/logos/", blank=True, null=True)
+
+    preferred = models.ForeignKey(
+        "self", related_name="variants", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    
+    objects = InstitutionManager()
+
+    def canonical(self):
+        return self.preferred or self
+
+    def __str__(self):
+        return self.short_name or self.name
+
+
 # ---------- Category ----------
-class CategoryGroup(TimeStampedModel):
+class CategoryGroup(BaseUserModel):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     def __str__(self): return self.name
 
 
-class PurchaseCategory(TimeStampedModel):
+class PurchaseCategory(BaseUserModel):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     group = models.ForeignKey(CategoryGroup, related_name="categories", blank=True, null=True, on_delete=models.SET_NULL)
@@ -24,7 +112,7 @@ class PurchaseCategory(TimeStampedModel):
 
 
 # ---------- Brand / Item ----------
-class Brand(TimeStampedModel):
+class Brand(BaseUserModel):
     name = models.CharField(max_length=255, unique=True)
     preferred = models.ForeignKey("self", related_name="variants",
                                     on_delete=models.SET_NULL, null=True, blank=True)
@@ -32,7 +120,7 @@ class Brand(TimeStampedModel):
     def __str__(self): return self.name
 
 
-class Product(TimeStampedModel):
+class Product(BaseUserModel):
     name = models.CharField(max_length=255, unique=True)
     preferred = models.ForeignKey("self", related_name="variants",
                                     on_delete=models.SET_NULL, null=True, blank=True)
@@ -66,8 +154,9 @@ class Product(TimeStampedModel):
 
         return label
 
+
 # ---------- Store ----------
-class Store(TimeStampedModel):
+class Store(BaseUserModel):
     name = models.CharField(max_length=255, unique=True)
     preferred = models.ForeignKey(
         "self", related_name="variants",
@@ -89,76 +178,7 @@ class Store(TimeStampedModel):
         return label
 
 
-
-# ---------- Institution ----------
-class Institution(TimeStampedModel):
-    """
-    Represents a financial or commercial institution such as a bank,
-    credit card company, investment platform, or insurance provider.
-    """
-
-    name = models.CharField(max_length=100, unique=True)
-    short_name = models.CharField(max_length=50, blank=True, null=True)
-    type = models.CharField(
-        max_length=30,
-        choices=[
-            ("bank", "Bank"),
-            ("credit_card", "Credit Card Issuer"),
-            ("broker", "Investment / Brokerage"),
-            ("insurance", "Insurance"),
-            ("fintech", "Fintech / Wallet"),
-            ("other", "Other"),
-        ],
-        default="bank",
-    )
-    country = models.CharField(max_length=50, blank=True, null=True)
-    website = models.URLField(blank=True, null=True)
-    logo = models.ImageField(upload_to="institutions/logos/", blank=True, null=True)
-
-    preferred = models.ForeignKey(
-        "self", related_name="variants", on_delete=models.SET_NULL, null=True, blank=True
-    )
-
-    def canonical(self):
-        return self.preferred or self
-
-    def __str__(self):
-        return self.short_name or self.name
-
-
-# catalog/models.py
-class Currency(TimeStampedModel):
-    """
-    ISO-based and crypto-compatible currency model for accounts, transactions, and analytics.
-    """
-    CURRENCY_TYPES = [
-        ("fiat", "Fiat Currency"),
-        ("crypto", "Cryptocurrency"),
-    ]
-
-    code = models.CharField(max_length=10, unique=True, help_text="Currency code (ISO 4217 or symbol like BTC)")
-    name = models.CharField(max_length=64)
-    symbol = models.CharField(max_length=8, blank=True, null=True)
-    type = models.CharField(max_length=10, choices=CURRENCY_TYPES, default="fiat")
-    country = models.CharField(max_length=64, blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-    rate_to_base = models.DecimalField(
-        max_digits=18, decimal_places=8, default=1, help_text="Conversion rate to system base currency."
-    )
-    is_base_currency = models.BooleanField(default=False, help_text="Only one should be base.")
-
-    class Meta:
-        ordering = ["type", "code"]
-
-    def __str__(self):
-        t = "₿" if self.type == "crypto" else ""
-        return f"{self.code} {t}".strip()
-
-    def canonical(self):
-        return self
-
-
-class ExchangeRateRecord(TimeStampedModel):
+class ExchangeRateRecord(BaseUserModel):
     """
     Immutable record of an exchange rate used during a transfer or cross-currency transaction.
     Stored as metadata inside Transaction (no reverse relation).
