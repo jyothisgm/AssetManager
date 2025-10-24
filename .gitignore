@@ -238,3 +238,7 @@ poetry.toml
 /staticfiles/
 
 .DS_Store
+
+*.json
+*.jpeg
+*.csv

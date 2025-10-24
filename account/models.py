@@ -1,10 +1,10 @@
 # account/models.py
 from django.db import models
-from catalog.models import Institution, Currency
 from django.db.models import Sum, Case, When, F, DecimalField
-
+from catalog.models import Institution, Currency
 from common.models import TimeStampedModel
 from user.models import BaseUserModel
+from common.logging_config import logger
 
 
 class AccountType(TimeStampedModel):
@@ -49,15 +49,14 @@ class Account(BaseUserModel):
         related_name="account",
         on_delete=models.PROTECT,
         null=True,
-        help_text="Currency of this account’s balance."
+        help_text="Currency of this account’s balance.",
     )
-    # balance = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         cur = self.currency.code if self.currency else "—"
         return f"{self.name} ({self.account_type.name}, {cur})"
-    
+
     @property
     def computed_balance(self):
         """
@@ -66,20 +65,30 @@ class Account(BaseUserModel):
         """
         from transaction.models import Transaction  # avoid circular import
 
-        result = (
-            Transaction.objects.filter(account=self)
-            .aggregate(
-                balance=Sum(
-                    Case(
-                        When(transaction_type__in=["credit", "transfer_credit"], then=F("amount")),
-                        When(transaction_type__in=["debit", "transfer_debit"], then=-F("amount")),
-                        default=0,
-                        output_field=DecimalField(max_digits=14, decimal_places=2),
+        logger.debug(f"[account.models] Computing balance for account '{self.name}' ({self.id})")
+
+        try:
+            result = (
+                Transaction.objects.filter(account=self)
+                .aggregate(
+                    balance=Sum(
+                        Case(
+                            When(transaction_type__in=["credit", "transfer_credit"], then=F("amount")),
+                            When(transaction_type__in=["debit", "transfer_debit"], then=-F("amount")),
+                            default=0,
+                            output_field=DecimalField(max_digits=14, decimal_places=2),
+                        )
                     )
                 )
+                .get("balance")
+                or 0
             )
-            .get("balance")
-            or 0
-        )
-        return round(result, 2)
+            rounded_balance = round(result, 2)
+            logger.debug(
+                f"[account.models] Computed balance for '{self.name}' = {rounded_balance} {self.currency.code if self.currency else ''}"
+            )
+            return rounded_balance
 
+        except Exception as e:
+            logger.exception(f"[account.models] Failed to compute balance for '{self.name}'")
+            return 0
