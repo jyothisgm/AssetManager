@@ -5,7 +5,6 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
 import uuid
-from django.core.files.storage import storages
 
 import os
 from common.models import SoftDeleteManager, SoftDeleteQuerySet, TimeStampedModel
@@ -130,7 +129,7 @@ class BaseUserQuerySet(SoftDeleteQuerySet):
         func_name = f"{self.__class__.__name__}.create"
         try:
             user = get_current_user()
-            if user and user.is_authenticated:
+            if not kwargs.get("created_by", None) and user and user.is_authenticated:
                 kwargs["created_by"] = user
                 logger.debug(f"[{func_name}] Setting created_by={user.email}")
             return super().create(**kwargs)
@@ -187,6 +186,7 @@ class BaseUserModel(TimeStampedModel):
 
 def dynamic_attachment_path(instance, filename):
     from transaction.models import transaction_attachment_path
+    from ai.models import ai_log_attachment_path
     """
     Calls a model-specific path function based on the parent model.
     """
@@ -200,6 +200,7 @@ def dynamic_attachment_path(instance, filename):
     # registry of model → function mapping
     path_map = {
         "transaction": transaction_attachment_path,
+        "airequestlog": ai_log_attachment_path,
         # add more here, e.g.
         # "account": account_attachment_path,
     }
@@ -211,6 +212,7 @@ def dynamic_attachment_path(instance, filename):
     else:
         # fallback generic path
         return os.path.join("attachments", model_name, filename)
+
 
 # --- main Attachment model ---
 class Attachment(BaseUserModel):

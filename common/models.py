@@ -96,7 +96,7 @@ class Unit(TimeStampedModel):
         ("pieces", "Pieces"),
     ]
     name = models.CharField(max_length=50, unique=True)
-    symbol = models.CharField(max_length=10, blank=True, null=True)
+    symbol = models.CharField(max_length=20, blank=True, null=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
     preferred = models.ForeignKey(
         "self", related_name="variants",

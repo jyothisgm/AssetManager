@@ -58,6 +58,19 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             logger.exception(f"[{func_name}] Error checking delete permission")
             raise e
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            RelatedModel = db_field.remote_field.model
+            if hasattr(RelatedModel, "created_by"):
+                kwargs["queryset"] = RelatedModel.objects.filter(created_by=request.user, is_deleted=False)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            RelatedModel = db_field.remote_field.model
+            if hasattr(RelatedModel, "created_by"):
+                kwargs["queryset"] = RelatedModel.objects.filter(created_by=request.user, is_deleted=False)
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 class RestrictedAdmin(RestrictedViewAdmin):
     def get_queryset(self, request):
@@ -73,6 +86,7 @@ class RestrictedAdmin(RestrictedViewAdmin):
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching queryset for {request.user.email}")
             raise e
+        
 
 
 @admin.register(User)

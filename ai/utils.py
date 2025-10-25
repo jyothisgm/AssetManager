@@ -4,10 +4,13 @@ import sys
 from google import genai
 from google.genai import types
 from django.conf import settings
+from django.utils import timezone
 
+from ai.models import save_ai_request_with_attachment
 from ai.prompts import PROMPT_GET_INSTITUTION
 from main.middleware import get_current_user
 from common.logging_config import logger
+
 
 
 MODEL = "gemini-2.5-flash-lite"
@@ -23,12 +26,13 @@ def get_gemini_client():
 
     if not api_key:
         api_key = settings.GEMINI_KEY
+        user = None
         logger.debug("[ai.utils] Using default GEMINI_KEY (no user-specific key found)")
     else:
         logger.debug(f"[ai.utils] Using user-specific Gemini key for {user.email}")
 
     try:
-        return genai.Client(api_key=api_key)
+        return genai.Client(api_key=api_key), user
     except Exception as e:
         logger.warning("[ai.utils] Failed to initialize Gemini client", exc_info=True)
         raise e
@@ -42,12 +46,20 @@ def call_gemini_api(prompt: str) -> str:
     logger.debug("[ai.utils] call_gemini_api invoked")
 
     try:
-        client = get_gemini_client()
+        client, user = get_gemini_client()
         response = client.models.generate_content(
             model=MODEL,
             contents=[types.Part(text=prompt)],
         )
         result = response.text.strip()
+        # ✅ Log both request and response
+        save_ai_request_with_attachment(
+            model_name=MODEL,
+            prompt=prompt,
+            response=result,
+            user=user,
+            filename=f"gemini_input_{timezone.now().strftime('%Y%m%d_%H%M%S')}.bin",
+        )
         logger.debug(f"[ai.utils] Gemini text response length={len(result)}")
         return result
     except Exception as e:
@@ -63,7 +75,7 @@ def call_gemini_api_file(file_bytes: bytes, mime_type: str, prompt: str) -> str:
     logger.debug(f"[ai.utils] call_gemini_api_file → MIME={mime_type}, size={len(file_bytes)} bytes")
 
     try:
-        client = get_gemini_client()
+        client, user = get_gemini_client()
         response = client.models.generate_content(
             model=MODEL,
             contents=[
@@ -72,6 +84,16 @@ def call_gemini_api_file(file_bytes: bytes, mime_type: str, prompt: str) -> str:
             ],
         )
         result = response.text.strip()
+        # ✅ Log both request and response
+        save_ai_request_with_attachment(
+            model_name=MODEL,
+            prompt=prompt,
+            response=result,
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            user=user,
+            filename=f"gemini_input_{timezone.now().strftime('%Y%m%d_%H%M%S')}.bin",
+        )
         logger.debug(f"[ai.utils] Gemini file response length={len(result)}")
         return result
     except Exception as e:
