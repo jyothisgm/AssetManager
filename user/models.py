@@ -214,6 +214,54 @@ def dynamic_attachment_path(instance, filename):
         return os.path.join("attachments", model_name, filename)
 
 
+def get_attachment_type(filename: str = "", mime_type: str = None) -> str:
+    """
+    Detects an appropriate Attachment.type value ("image", "pdf", "csv", "json", "text", "email", or "other")
+    from MIME type or filename extension.
+
+    :param filename: The uploaded file name
+    :param mime_type: The MIME type string, if available
+    :return: One of the allowed type strings
+    """
+    file_type = "other"
+
+    # Normalize inputs
+    mime = (mime_type or "").lower()
+    ext = (filename or "").lower().split(".")[-1] if "." in (filename or "") else ""
+
+    # Priority 1: use MIME type
+    if "image" in mime:
+        return "image"
+    if "pdf" in mime:
+        return "pdf"
+    if "csv" in mime:
+        return "csv"
+    if "json" in mime:
+        return "json"
+    if "text" in mime or "plain" in mime:
+        return "text"
+    if "html" in mime or "xml" in mime:
+        return "text"
+    if "email" in mime or "message" in mime:
+        return "email"
+
+    # Priority 2: use extension
+    if ext in ("png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp"):
+        return "image"
+    if ext == "pdf":
+        return "pdf"
+    if ext == "csv":
+        return "csv"
+    if ext == "json":
+        return "json"
+    if ext in ("txt", "md", "log"):
+        return "text"
+    if ext in ("eml", "msg"):
+        return "email"
+
+    return file_type
+
+
 # --- main Attachment model ---
 class Attachment(BaseUserModel):
     ATTACHMENT_TYPES = [
@@ -246,4 +294,19 @@ class Attachment(BaseUserModel):
     content_object = GenericForeignKey("content_type", "object_id")
 
     def __str__(self):
-        return self.description or f"{self.type.capitalize()} ({self.id})"
+        parts = [self.type.capitalize()]
+
+        # Include file name if available
+        if self.file and hasattr(self.file, "name") and self.file.name:
+            parts.append(os.path.basename(self.file.name))
+
+        # Include linked object name if available
+        if self.content_object:
+            parts.append(str(self.content_object))
+
+        # Include description if available
+        if self.description:
+            parts.append(self.description)
+
+        # Join all parts with " – "
+        return " – ".join(parts) or f"{self.type.capitalize()} ({self.id})"

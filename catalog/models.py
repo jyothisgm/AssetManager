@@ -227,11 +227,16 @@ class Store(BaseUserModel):
         return self.preferred or self
 
     def __str__(self):
-        label = self.preferred.name if self.preferred else self.name
-        cats = list(self.categories.all()[:2])
-        if cats:
-            cat_labels = ", ".join(c.name for c in cats)
-            return f"{label} ({cat_labels})"
+        if self.preferred:
+            label = self.preferred.name
+            cats = list(self.preferred.categories.all()[:2])
+            if cats:
+                label += " (" + ", ".join(c.name for c in cats) + ")"
+        else:
+            label = self.name
+            cats = list(self.categories.all()[:2])
+            if cats:
+                label += " (" + ", ".join(c.name for c in cats) + ")"
         return label
 
 
@@ -247,13 +252,13 @@ class ExchangeRateRecord(BaseUserModel):
 
     base_currency = models.ForeignKey(
         Currency,
-        related_name="+",
+        related_name="base_exchange_records",
         on_delete=models.PROTECT,
         help_text="Currency being converted from",
     )
     quote_currency = models.ForeignKey(
         Currency,
-        related_name="+",
+        related_name="quoted_exchange_records",
         on_delete=models.PROTECT,
         help_text="Currency being converted to",
     )

@@ -1,7 +1,6 @@
 import mimetypes
 import os
 import uuid
-import sys
 import pytz
 from datetime import timedelta
 
@@ -15,14 +14,51 @@ from rangefilter.filters import DateRangeFilter
 from django.contrib.contenttypes.models import ContentType
 
 from account.models import Account
+from catalog.models import PurchaseCategory
 from transaction.admin_forms import TransactionItemInlineForm
 from transaction.models import Transaction, TransactionItem
 from transaction.invoice_handling import process_transaction_file
-from django.contrib.admin import RelatedOnlyFieldListFilter
 from user.admin import RestrictedAdmin
+from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, DropdownFilter
 
 from common.logging_config import logger
-from user.models import Attachment
+from user.models import Attachment, get_attachment_type
+
+
+class ProductCategoryDropdownFilter(admin.SimpleListFilter):
+    title = "Product Category"
+    parameter_name = "product_category"
+
+    # Use same template for consistent style
+    template = "django_admin_listfilter_dropdown/dropdown_filter.html"  # same as RelatedOnlyDropdownFilter
+
+    def lookups(self, request, model_admin):
+        """Show only categories that appear in existing TransactionItems."""
+        # collect all distinct category IDs from product or product.preferred
+        used_category_ids = (
+            TransactionItem.objects.filter(
+                Q(product__category__isnull=False) | Q(product__preferred__category__isnull=False)
+            )
+            .values_list("product__category_id", flat=True)
+            .union(
+                TransactionItem.objects.filter(product__preferred__category__isnull=False)
+                .values_list("product__preferred__category_id", flat=True)
+            )
+        )
+
+        # return only those categories that actually appear
+        categories = PurchaseCategory.objects.filter(id__in=used_category_ids).order_by("name")
+        return [(c.id, c.name) for c in categories]
+
+    def queryset(self, request, queryset):
+        """Filter by related product category or preferred category."""
+        value = self.value()
+        if value:
+            return queryset.filter(
+                Q(product__category_id=value) | Q(product__preferred__category_id=value)
+            )
+        return queryset
+
 
 
 # -----------------------------------
@@ -32,8 +68,8 @@ class TransactionItemInline(admin.TabularInline):
     model = TransactionItem
     form = TransactionItemInlineForm
     extra = 0
-    fields = ("product", "brand_display", "category_display", "quantity", "unit", "price")
-    can_delete = False
+    fields = ("product", "category_display", "quantity", "unit", "price")
+    autocomplete_fields = ("product", )
     show_change_link = False
 
     class Media:
@@ -69,19 +105,25 @@ class TransactionAdmin(RestrictedAdmin):
         "amount",
         "currency",
         "category",
-        "fee",
+        "totals_match"
     )
-    search_fields = ("store__name", "description", "category__name")
+    search_fields = ("store__name", "description", "category__name", "account__name", 
+                        "items__product__name", "items__product__preferred__name",  
+                        "items__product__brand__preferred__name", "items__product__brand__name")
+
     list_filter = (
         ("date", DateRangeFilter),
-        "transaction_type",
-        ("currency", RelatedOnlyFieldListFilter),
-        ("account", RelatedOnlyFieldListFilter),
-        ("category", RelatedOnlyFieldListFilter),
-        ("store", RelatedOnlyFieldListFilter),
+        ("transaction_type", DropdownFilter),
+        ("totals_match", admin.BooleanFieldListFilter),
+        ("currency", RelatedOnlyDropdownFilter),
+        ("account", RelatedOnlyDropdownFilter),
+        ("category", RelatedOnlyDropdownFilter),
+        ("store", RelatedOnlyDropdownFilter),
     )
+
     ordering = ("-date",)
-    readonly_fields = ("processed", "view_attachment", "created_at", "modified_at")
+    readonly_fields = ("processed", "view_attachment", "created_at", "modified_at", "total_from_items", "totals_match")
+    autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
 
@@ -213,20 +255,27 @@ class TransactionAdmin(RestrictedAdmin):
                     # Attach file only once
                     if idx == 0:
                         try:
+                            # 1️⃣ Detect proper type using the shared utility
+                            mime_type = uploaded_file.content_type or mimetypes.guess_type(uploaded_file.name)[0]
+                            file_type = get_attachment_type(uploaded_file.name, mime_type)
+
+                            # 2️⃣ Build a clean timestamped name
                             timestamp = date_val.strftime("%Y%m%d_%H%M%S")
                             extension = uploaded_file.name.split(".")[-1]
-                            custom_name = f"{doc_type}_{preferred_store.name}_{timestamp}.{extension}"
+                            clean_store_name = preferred_store.name.replace(" ", "_")
+                            custom_name = f"{file_type}_{clean_store_name}_{timestamp}.{extension}"
 
-                            # Create and save the attachment
+                            logger.debug(f"[{func_name}] Saving attachment type={file_type} mime={mime_type} name={custom_name}")
+
+                            # 3️⃣ Create and save attachment
                             attachment = Attachment.objects.create(
                                 created_by=transaction.created_by,
-                                type=doc_type,
-                                description=preferred_store.name,  # will appear in filename
+                                type=file_type,
+                                description=f"{preferred_store.name} ({file_type})",
                                 content_type=ContentType.objects.get_for_model(transaction),
                                 object_id=transaction.id,
                             )
 
-                            # Save the actual file (will trigger upload_to path creation)
                             attachment.file.save(custom_name, uploaded_file, save=True)
                             transaction.attachment = attachment
                             transaction.save(update_fields=["attachment"])
@@ -234,6 +283,7 @@ class TransactionAdmin(RestrictedAdmin):
                             logger.debug(f"[{func_name}] File attached as {custom_name}")
                         except Exception as e:
                             logger.warning(f"[{func_name}] Could not attach file: {e}", exc_info=True)
+
 
                     if existing_tx:
                         transaction.items.all().delete()
@@ -347,8 +397,12 @@ class TransactionAdmin(RestrictedAdmin):
 class TransactionItemAdmin(RestrictedAdmin):
     list_display = ("transaction", "product", "product_category", "quantity", "unit", "price", "date")
     readonly_fields = ("created_at", "modified_at")
-    search_fields = ("product__name",)
-    list_filter = ("unit",)
+    search_fields = ("product__name", "product__category__name",
+                        "product__preferred__name", "product__brand__preferred__name", "product__brand__name")
+    list_filter = (
+        ("unit", RelatedOnlyDropdownFilter), 
+        ProductCategoryDropdownFilter
+    )
     ordering = ("-date",)
     autocomplete_fields = ("transaction", "product", "unit")
 

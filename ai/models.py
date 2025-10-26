@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 
-from user.models import BaseUserModel, Attachment
+from user.models import BaseUserModel, Attachment, get_attachment_type
 
 logger = logging.getLogger(__name__)
 
@@ -86,66 +86,59 @@ class AIRequestLog(BaseUserModel):
         return f"{self.model_name} | {self.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
-# -------------------------------------------------------------------
-# HELPER FUNCTION
-# -------------------------------------------------------------------
 def save_ai_request_with_attachment(
-    model_name, prompt, response,
-    file_bytes=None, mime_type=None,
-    user=None, filename=None
+    model_name,
+    prompt,
+    response,
+    file_bytes=None,
+    mime_type=None,
+    user=None,
+    filename=None
 ):
     """
-    Create an AIRequestLog entry and optionally attach the uploaded file using Attachment model.
+    Create an AIRequestLog entry and optionally attach the uploaded file.
+    Automatically detects and assigns Attachment.type using MIME type or filename.
     """
     func_name = "save_ai_request_with_attachment"
     attachment = None
     log_entry = None
 
     try:
+        # -----------------------------------------------------------
+        # 1️⃣ Detect file type using shared utility
+        # -----------------------------------------------------------
+        file_type = get_attachment_type(filename, mime_type)
+
+        # -----------------------------------------------------------
+        # 2️⃣ Create Attachment if a file is provided
+        # -----------------------------------------------------------
         if file_bytes and filename:
-            # Create the Attachment record
             from django.contrib.auth import get_user_model
             User = get_user_model()
-
             superuser = User.objects.filter(is_superuser=True).first()
 
+            # --- Build new filename ---
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ext = os.path.splitext(filename)[1].lstrip(".") or "bin"
+            clean_name = os.path.splitext(filename)[0]
+            new_filename = f"{timestamp}_{clean_name}.{ext}"
+
+            # --- Create Attachment record ---
             attachment = Attachment.objects.create(
-                type="ai_input",  # new type for AI uploads
-                description=f"AI request input - {filename}",
+                type=file_type,
+                description=f"{file_type.capitalize()} uploaded for AI request - {filename}",
                 content_type=ContentType.objects.get_for_model(AIRequestLog),
-                object_id=uuid.uuid4(),  # temporary placeholder
-                created_by=superuser
+                object_id=uuid.uuid4(),  # temporary placeholder until log created
+                created_by=user or superuser,
             )
 
-            # --- Determine the correct file extension ---
-            extension = None
-
-            # Try to extract from mime type first
-            if mime_type:
-                extension = mimetypes.guess_extension(mime_type)
-                if extension:
-                    extension = extension.lstrip(".")  # remove leading dot
-
-            # Fallback to extension from original filename
-            if not extension and "." in filename:
-                extension = filename.split(".")[-1]
-
-            # Final fallback
-            extension = extension or "bin"
-
-            # --- Timestamped filename ---
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            clean_name = os.path.splitext(filename)[0]  # strip any old extension
-            new_filename = f"{timestamp}_{clean_name}.{extension}"
-
-            logger.debug(f"[{func_name}] Saving AI file as {new_filename} (mime={mime_type})")
-
-            # --- Save the file with correct extension and timestamp ---
+            # --- Save file ---
             attachment.file.save(new_filename, ContentFile(file_bytes), save=True)
+            logger.debug(f"[{func_name}] Saved attachment ({file_type}) as {new_filename}")
 
-            logger.debug(f"[{func_name}] Saved attachment file: {filename}")
-
-        # Create the AIRequestLog itself
+        # -----------------------------------------------------------
+        # 3️⃣ Create the AIRequestLog entry
+        # -----------------------------------------------------------
         log_entry = AIRequestLog.objects.create(
             model_name=model_name,
             prompt_text=prompt,
@@ -154,14 +147,17 @@ def save_ai_request_with_attachment(
             created_by=user,
             attachment=attachment,
         )
-        logger.info(f"[{func_name}] AIRequestLog created for model={model_name} by user={getattr(user, 'email', 'unknown')}")
 
-        # Now update the attachment link with real log entry ID
+        logger.info(f"[{func_name}] Created AIRequestLog for model={model_name} by {getattr(user, 'email', 'unknown')}")
+
+        # -----------------------------------------------------------
+        # 4️⃣ Link attachment to the real log entry
+        # -----------------------------------------------------------
         if attachment:
             attachment.content_type = ContentType.objects.get_for_model(log_entry)
             attachment.object_id = log_entry.id
             attachment.save(update_fields=["content_type", "object_id"])
-            logger.debug(f"[{func_name}] Linked attachment {attachment.id} to AIRequestLog {log_entry.id}")
+            logger.debug(f"[{func_name}] Linked attachment {attachment.id} → AIRequestLog {log_entry.id}")
 
     except Exception as e:
         logger.exception(f"[{func_name}] Error saving AI request log: {e}")

@@ -58,20 +58,6 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             logger.exception(f"[{func_name}] Error checking delete permission")
             raise e
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if not request.user.is_superuser:
-            RelatedModel = db_field.remote_field.model
-            if hasattr(RelatedModel, "created_by"):
-                kwargs["queryset"] = RelatedModel.objects.filter(created_by=request.user, is_deleted=False)
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    def formfield_for_manytomany(self, db_field, request, **kwargs):
-        if not request.user.is_superuser:
-            RelatedModel = db_field.remote_field.model
-            if hasattr(RelatedModel, "created_by"):
-                kwargs["queryset"] = RelatedModel.objects.filter(created_by=request.user, is_deleted=False)
-        return super().formfield_for_manytomany(db_field, request, **kwargs)
-
 class RestrictedAdmin(RestrictedViewAdmin):
     def get_queryset(self, request):
         func_name = f"{self.__class__.__name__}.get_queryset"
@@ -86,7 +72,38 @@ class RestrictedAdmin(RestrictedViewAdmin):
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching queryset for {request.user.email}")
             raise e
-        
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            RelatedModel = db_field.remote_field.model
+            related_admin = self._get_related_admin(RelatedModel)
+
+            # Restrict only if the related admin is a RestrictedAdmin subclass
+            if isinstance(related_admin, RestrictedAdmin):
+                if hasattr(RelatedModel, "created_by"):
+                    kwargs["queryset"] = RelatedModel.objects.filter(
+                        created_by=request.user, is_deleted=False
+                    )
+
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+    
+    def _get_related_admin(self, model):
+        """Utility to get the admin class registered for a model."""
+        return admin.site._registry.get(model)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            RelatedModel = db_field.remote_field.model
+            related_admin = self._get_related_admin(RelatedModel)
+
+            if isinstance(related_admin, RestrictedAdmin):
+                if hasattr(RelatedModel, "created_by"):
+                    kwargs["queryset"] = RelatedModel.objects.filter(
+                        created_by=request.user, is_deleted=False
+                    )
+
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
 
 
 @admin.register(User)

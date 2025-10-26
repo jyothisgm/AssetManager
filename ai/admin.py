@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from ai.models import AIRequestLog
 from user.admin import RestrictedAdmin
+from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, DropdownFilter
 
 
 @admin.register(AIRequestLog)
@@ -15,8 +16,12 @@ class AIRequestLogAdmin(RestrictedAdmin):
         "prompt_excerpt",
         "response_excerpt",
     )
-    list_filter = ("model_name", "created_by", "mime_type", "created_at")
-    search_fields = ("prompt_text", "response_text", "model_name")
+    list_filter = (
+        ("model_name", DropdownFilter), 
+        ("created_by", RelatedOnlyDropdownFilter),
+        ("mime_type", DropdownFilter),
+        )
+    search_fields = ("prompt_text", "response_text", "model_name", "created_by__email", "created_by__first_name", "created_by__last_name")
     readonly_fields = (
         "id",
         "model_name",

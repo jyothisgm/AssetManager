@@ -1,7 +1,7 @@
 from django.contrib import admin
 from common.models import Currency, Unit
 from common.logging_config import logger
-
+from django_admin_listfilter_dropdown.filters import DropdownFilter, RelatedOnlyDropdownFilter
 
 # ------------------------------
 # UNIT ADMIN
@@ -18,8 +18,20 @@ class UnitAdmin(admin.ModelAdmin):
         "variant_count",
         "created_at",
     )
-    list_filter = ("category",)
-    search_fields = ("name", "symbol")
+    search_fields = (
+        "name",
+        "symbol",
+        "preferred__name",
+        "preferred__symbol",
+        "base_unit__name",
+        "base_unit__symbol",
+    )
+    list_filter = (
+        "category", 
+        ("base_unit", RelatedOnlyDropdownFilter),
+        ("preferred", RelatedOnlyDropdownFilter)
+    )
+    autocomplete_fields = ('preferred', 'base_unit')
     readonly_fields = ("created_at", "modified_at")
 
     def preferred_display(self, obj):
@@ -32,6 +44,23 @@ class UnitAdmin(admin.ModelAdmin):
 
     def variant_count(self, obj):
         return obj.variants.count()
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "preferred":
+            # exclude the current store itself and deleted ones
+            qs = Unit.objects.filter(is_deleted=False, preferred=None)
+            if request.resolver_match.kwargs.get("object_id"):
+                current_id = request.resolver_match.kwargs["object_id"]
+                qs = qs.exclude(id=current_id)
+            kwargs["queryset"] = qs.order_by("name")
+        if db_field.name == "base_unit":
+            # exclude the current store itself and deleted ones
+            qs = Unit.objects.filter(is_deleted=False, base_unit=None)
+            if request.resolver_match.kwargs.get("object_id"):
+                current_id = request.resolver_match.kwargs["object_id"]
+                qs = qs.exclude(id=current_id)
+            kwargs["queryset"] = qs.order_by("name")
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 # ------------------------------
@@ -39,9 +68,9 @@ class UnitAdmin(admin.ModelAdmin):
 # ------------------------------
 @admin.register(Currency)
 class CurrencyAdmin(admin.ModelAdmin):
-    list_display = ("code", "name")
+    list_display = ("code", "name", "symbol", "country", "type")
     search_fields = ("code", "name", "symbol", "country")
-    list_filter = ("type", "is_active", "is_base_currency", "country")
+    list_filter = ("type", ("country", DropdownFilter))
     ordering = ("type", "code")
 
     def get_queryset(self, request):

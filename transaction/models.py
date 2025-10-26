@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from django.db import models
 from django.utils import timezone
 from account.models import Account
@@ -5,11 +6,18 @@ from common.models import Unit
 from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
 import uuid
 from user.models import Attachment, BaseUserModel
+from django.db.models import Sum, Case, When, F, Q, DecimalField, FloatField
 from common.logging_config import logger
 from django.conf import settings
 
 import os
 from datetime import datetime
+
+
+
+def _to_cents(value: Decimal) -> int:
+    # compare in cents to avoid float noise
+    return int((value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100))
 
 
 def transaction_attachment_path(instance, filename):
@@ -61,6 +69,7 @@ class Transaction(BaseUserModel):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateTimeField(default=timezone.now)
     description = models.CharField(max_length=255, blank=True, null=True)
+    totals_match = models.BooleanField(null=True, default=None)
     processed = models.BooleanField(default=False)
     currency = models.ForeignKey(
         Currency, on_delete=models.PROTECT, related_name="transactions", null=True, blank=True
@@ -118,27 +127,60 @@ class Transaction(BaseUserModel):
     def total_from_items(self):
         func_name = f"{self.__class__.__name__}.total_from_items"
         try:
-            total = sum(item.price for item in self.items.all())
+            # price is a line total already
+            total = sum(Decimal(str(item.price)) for item in self.items.all())
             logger.debug(f"[{func_name}] Computed total from {self.items.count()} items: {total}")
             return total
-        except Exception as e:
+        except Exception:
             logger.exception(f"[{func_name}] Error computing total_from_items for Transaction ID={self.id}")
-            raise e
+            raise
 
-    def reconcile_amount(self):
-        func_name = f"{self.__class__.__name__}.reconcile_amount"
-        try:
-            total = self.total_from_items
-            if total and total != self.amount:
-                logger.info(f"[{func_name}] Reconciling transaction ID={self.id}: {self.amount} → {total}")
-                self.amount = total
-                self.save(update_fields=["amount"])
-                logger.debug(f"[{func_name}] Updated transaction ID={self.id} with reconciled amount={self.amount}")
-            else:
-                logger.debug(f"[{func_name}] No reconciliation needed for Transaction ID={self.id}")
-        except Exception as e:
-            logger.exception(f"[{func_name}] Error during reconciliation for Transaction ID={self.id}")
-            raise e
+    def update_total_match_status(self):
+        totals = self.items.aggregate(
+            total=Sum(
+                F("price"),
+                output_field=DecimalField(max_digits=20, decimal_places=2)
+            )
+        )
+        items_total = totals.get("total") or Decimal("0.00")
+        txn_amount = Decimal(str(self.amount or 0))
+        has_items = self.items.exists()
+        tolerance = Decimal("0.02")  # allow up to 2-cent rounding error
+
+        # ✅ Adjust by exchange rate if applicable
+        if has_items and self.exchange_rate_record and getattr(self.exchange_rate_record, "provider_rate", None):
+            try:
+                rate = Decimal(str(self.exchange_rate_record.provider_rate))
+                if rate > 0:
+                    txn_amount_old = txn_amount
+                    txn_amount = (txn_amount / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    logger.info(
+                        f"[Transaction.update_total_match_status] Transaction {self.id}: "
+                        f"Adjusted items_total by provider_rate={txn_amount_old} / {rate} → {txn_amount}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[Transaction.update_total_match_status] Could not apply exchange rate for Transaction {self.id}: {e}",
+                    exc_info=True,
+                )
+
+        if not has_items:
+            new_status = None  # neutral: no items
+            diff = None
+        else:
+            diff = abs(
+                items_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                - txn_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            )
+            new_status = diff <= tolerance
+
+        if self.totals_match != new_status:
+            self.totals_match = new_status
+            self.save(update_fields=["totals_match"])
+            logger.info(
+                f"[Transaction.update_total_match_status] Transaction {self.id}: totals_match={new_status}, "
+                f"has_items={has_items}, items_total={items_total}, amount={txn_amount}, diff={diff}"
+            )
 
 
 class TransactionItem(BaseUserModel):
@@ -154,30 +196,48 @@ class TransactionItem(BaseUserModel):
 
     quantity = models.FloatField(default=1)
     unit = models.ForeignKey(Unit, on_delete=models.SET_NULL, null=True, blank=True)
-    price = models.FloatField(default=0)
+    price = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return f"{self.product or 'Item'} ({self.quantity} {self.unit or ''}) - €{self.price}"
 
     def save(self, *args, **kwargs):
-        func_name = f"{self.__class__.__name__}.save"
+        super().save(*args, **kwargs)
         try:
-            logger.debug(
-                f"[{func_name}] Saving TransactionItem (product={self.product}, price={self.price}, qty={self.quantity})"
-            )
-            super().save(*args, **kwargs)
-            logger.debug(f"[{func_name}] TransactionItem saved successfully (ID={self.id})")
-        except Exception as e:
-            logger.exception(f"[{func_name}] Error saving TransactionItem (product={self.product})")
-            raise e
+            self.transaction.update_total_match_status()
+            logger.debug(f"[TransactionItem.save] Updated total match for Transaction {self.transaction_id}")
+        except Exception:
+            logger.exception(f"[TransactionItem.save] Failed to update totals for Transaction {self.transaction_id}")
 
     def delete(self, *args, **kwargs):
-        func_name = f"{self.__class__.__name__}.delete"
-        try:
-            logger.info(f"[{func_name}] Deleting TransactionItem ID={self.id}")
-            super().delete(*args, **kwargs)
-            logger.debug(f"[{func_name}] TransactionItem ID={self.id} deleted successfully")
-        except Exception as e:
-            logger.exception(f"[{func_name}] Error deleting TransactionItem ID={self.id}")
-            raise e
+        txn = self.transaction
+        super().delete(*args, **kwargs)
+        if txn:
+            try:
+                txn.update_total_match_status()
+                logger.debug(f"[TransactionItem.delete] Updated total match for Transaction {txn.id}")
+            except Exception:
+                logger.exception(f"[TransactionItem.delete] Failed to update totals for Transaction {txn.id}")
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=Transaction)
+def update_transaction_total_match_on_save(sender, instance, created, **kwargs):
+    """
+    Automatically recalculate totals_match whenever a Transaction is saved.
+    """
+    try:
+        # Avoid recursion if update_total_match_status() itself triggered the save
+        if not kwargs.get("update_fields") or "totals_match" not in kwargs.get("update_fields", []):
+            instance.update_total_match_status()
+            logger.debug(
+                f"[post_save] Updated totals_match for Transaction ID={instance.id} "
+                f"(created={created})"
+            )
+    except Exception as e:
+        logger.exception(
+            f"[post_save] Error updating totals_match for Transaction ID={instance.id}: {e}"
+        )
