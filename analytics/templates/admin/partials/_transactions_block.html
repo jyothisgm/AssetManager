@@ -1,0 +1,31 @@
+{% if selected_transactions %}
+    <h3>
+        {{ selected_category }} ({{ selected_currency }})
+    </h3>
+    <table class="stats-table">
+        <thead>
+        <tr>
+            <th>Date</th>
+            <th>Account</th>
+            <th>Store</th>
+            <th>Category</th>
+            <th style="text-align:right;">Amount</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for t in selected_transactions %}
+        <tr onclick="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')" style="cursor:pointer;">
+            <th class="nowrap"><a href="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')">{{ t.date|date:"Y-m-d" }}</a></th>
+            <td>{{ t.account.name|default:"—" }}</td>
+            <th class="nowrap"><a href="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')">{{ t.store.name|default:"—" }}</a></th>
+            <td>{{ t.category.name|default:"—" }}</td>
+            <td style="text-align:right;">{{ t.amount|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" style="text-align:center;">No transactions found</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No transactions found.</p>
+{% endif %}

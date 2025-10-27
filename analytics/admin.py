@@ -20,6 +20,7 @@ class AnalyticsAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom_urls = [
             path("analytics_dashboard/", self.admin_site.admin_view(self.analytics_dashboard), name="analytics_dashboard"),
+            path("analytics_transactions_block/", self.admin_site.admin_view(self.transactions_block), name="analytics_transactions_block"),
         ]
         return custom_urls + urls
 
@@ -140,3 +141,44 @@ class AnalyticsAdmin(admin.ModelAdmin):
         except Exception as e:
             logger.exception(f"[{func_name}] Error generating analytics: {e}")
             raise
+
+    def transactions_block(self, request):
+        """Return only the rendered HTML block for a selected category."""
+        from django.template.loader import render_to_string
+        from django.http import JsonResponse
+
+        func_name = "AnalyticsAdmin.transactions_block"
+
+        try:
+            category_name = request.GET.get("category")
+            currency = request.GET.get("currency")
+            view_type = request.GET.get("view")
+            month = int(request.GET.get("month", 0))
+            year = int(request.GET.get("year"))
+
+            transactions = Transaction.objects.filter(
+                created_by=request.user,
+                category__name=category_name,
+                currency__code=currency,
+            )
+            if view_type == "monthly":
+                transactions = transactions.filter(date__year=year, date__month=month)
+            else:
+                transactions = transactions.filter(date__year=year)
+
+            selected_transactions = transactions.order_by("-amount")
+
+            html = render_to_string(
+                "admin/partials/_transactions_block.html",
+                {
+                    "selected_transactions": selected_transactions,
+                    "selected_category": category_name,
+                    "selected_currency": currency,
+                },
+                request=request,
+            )
+            return JsonResponse({"html": html})
+
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error: {e}")
+            return JsonResponse({"error": str(e)}, status=500)

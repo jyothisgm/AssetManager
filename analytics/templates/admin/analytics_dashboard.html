@@ -75,14 +75,24 @@
   width: 100%;
   border-collapse: collapse;
 }
-.stats-table th, .stats-table td {
+.stats-table thead, .stats-table td {
   padding: 8px;
   text-align: left;
 }
-.stats-table th {
+.stats-table thead th {
   background: var(--header-bg);
   color: white;
 }
+
+.stats-table tr:hover {
+  background: var(--selected-row);
+}
+
+.stats-table tr.selected {
+  background-color: var(--selected-row, #e0f2fe);  /* fallback: light blue */
+  font-weight: 600;
+}
+
 .tab-header {
   margin-bottom: 1rem;
 }
@@ -211,13 +221,13 @@ document.addEventListener("DOMContentLoaded", updateLabel);
             </thead>
             <tbody>
                 {% for row in category_totals_by_currency %}
-                {% if row.currency__code == c.currency__code %}
-                <tr>
-                    <td>{{ row.category__name|default:"—" }}</td>
-                    <td>{{ row.total|floatformat:2 }}</td>
-                    <td>{{ row.percent }}%</td>
-                </tr>
-                {% endif %}
+                  {% if row.currency__code == c.currency__code %}
+                    <tr onclick="showTransactions('{{ row.category__name|escapejs }}', '{{ row.currency__code|escapejs }}')" style="cursor:pointer;">
+                        <td>{{ row.category__name|default:"—" }}</td>
+                        <td>{{ row.total|floatformat:2 }}</td>
+                        <td>{{ row.percent }}%</td>
+                    </tr>
+                  {% endif %}
                 {% endfor %}
             </tbody>
             </table>
@@ -225,6 +235,38 @@ document.addEventListener("DOMContentLoaded", updateLabel);
         </div>
     </div>
 {% endfor %}
+
+<div id="transactionsContainer"></div>
+
+<script>
+function showTransactions(category, currency) {
+  const params = new URLSearchParams({
+    category,
+    currency,
+    view: "{{ view_type }}",
+    month: "{{ month }}",
+    year: "{{ year }}"
+  });
+    // --- Highlight selected row ---
+  document.querySelectorAll('.stats-table tr').forEach(tr => tr.classList.remove('selected'));
+  const clickedRow = event.currentTarget;
+  clickedRow.classList.add('selected');
+
+  const url = "{% url 'admin:analytics_transactions_block' %}?" + params.toString();
+
+  fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      document.getElementById("transactionsContainer").innerHTML = data.html;
+      document.getElementById("transactionsContainer").scrollIntoView({ behavior: "smooth" });
+    })
+    .catch(err => {
+      console.error(err);
+      alert("Error loading transactions: " + err.message);
+    });
+}
+</script>
 
 <!-- ChartJS -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
