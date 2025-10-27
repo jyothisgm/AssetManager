@@ -1,0 +1,4 @@
+[build]
+# Force Python detection and run these commands
+buildCommand = "python3.11 -m pip install --upgrade pip && pip install -r requirements.txt"
+postBuildCommand = "python manage.py migrate --noinput && python manage.py collectstatic --noinput"
