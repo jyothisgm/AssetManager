@@ -120,12 +120,36 @@ class TransactionAdmin(RestrictedAdmin):
         ("category", RelatedOnlyDropdownFilter),
         ("store", RelatedOnlyDropdownFilter),
     )
+    fieldsets = (
+        ("📄 Basic Details", {
+            "fields": ( "date", "account", "transaction_type", "amount", "category", "store"),
+        }),
+        ("🏦 Extra", {
+            "fields": ("currency", "description", "notes", "attachment"),
+            "classes": ("collapse",),
+        }),
+        ("🔄 Transfers/Currency Exchange", {
+            "fields": ("linked_transaction", "fee", "exchange_rate_record"),
+            "classes": ("collapse",),
+        }),
+        ("📊 Computed / Status", {
+            "fields": ("total_from_items", "totals_match", "processed"),
+            "classes": ("collapse",),
+        }),
+    )
 
     ordering = ("-date",)
     readonly_fields = ("processed", "view_attachment", "created_at", "modified_at", "total_from_items", "totals_match")
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
+    
+    def save_model(self, request, obj, form, change):
+        """Automatically set currency from selected account if not manually chosen."""
+        if obj.account and not obj.currency:
+            obj.currency = obj.account.currency
+        super().save_model(request, obj, form, change)
+
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"

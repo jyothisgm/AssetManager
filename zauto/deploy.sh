@@ -14,8 +14,8 @@ CONTAINER_LOGS="logs"
 SQL_SERVER="assetmgr-sqlserver"
 SQL_DB="assetmgr-db"
 SQL_ADMIN_USER="django_admin"
-SQL_ADMIN_PASS="SecureP@ssw0rd!"  # ⚠️ Change this!
-LOCATION="westeurope"
+SQL_ADMIN_PASS="VnRsoOTG09jpbhSgzVUPetBmUbD3Qj"
+LOCATION="francecentral"
 
 # Move to the project root (parent of zauto)
 cd "$(dirname "$0")/.."

@@ -127,10 +127,12 @@ class Transaction(BaseUserModel):
     def total_from_items(self):
         func_name = f"{self.__class__.__name__}.total_from_items"
         try:
-            # price is a line total already
-            total = sum(Decimal(str(item.price)) for item in self.items.all())
-            logger.debug(f"[{func_name}] Computed total from {self.items.count()} items: {total}")
-            return total
+            if self.id:
+                # price is a line total already
+                total = sum(Decimal(str(item.price)) for item in self.items.all())
+                logger.debug(f"[{func_name}] Computed total from {self.items.count()} items: {total}")
+                return total
+            return '-'
         except Exception:
             logger.exception(f"[{func_name}] Error computing total_from_items for Transaction ID={self.id}")
             raise
