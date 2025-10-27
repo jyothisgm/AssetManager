@@ -1,0 +1,10 @@
+{% extends "admin/index.html" %}
+{% block sidebar %}
+{{ block.super }}
+<div class="module">
+    <h2>Custom Dashboards</h2>
+    <ul class="admin-links">
+        <li><a href="/dashboard/analytics-dashboard/">📊 Analytics Dashboard</a></li>
+    </ul>
+</div>
+{% endblock %}

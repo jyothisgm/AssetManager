@@ -24,9 +24,6 @@ from django.views.generic import RedirectView
 urlpatterns = [
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
     path('admin/', admin.site.urls),
-    # path('api/bills/', include('bills.urls')),  # your app routes
-    path("api/v1/auth/", include("oauth2_provider.urls", namespace="oauth2_provider")),
-    path("api/v1/user/", include("user.urls")),
 
 ]
 

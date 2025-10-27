@@ -17,34 +17,46 @@
         {% for model in app.models %}
           {% with model_name=model.object_name|lower %}
             <tr class="model-{{ model_name }}{% if model.admin_url in request.path|urlencode %} current-model{% endif %}">
-              <th scope="row" id="{{ app.app_label }}-{{ model_name }}">
-                {% if model.admin_url %}
-                  <a href="{{ model.admin_url }}"{% if model.admin_url in request.path|urlencode %} aria-current="page"{% endif %}>{{ model.name }}</a>
-                {% else %}
-                  {{ model.name }}
-                {% endif %}
-              </th>
-
-              {% if model.add_url %}
-                <td><a href="{{ model.add_url }}" class="addlink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Add' %}</a></td>
-              {% else %}
-                <td></td>
-              {% endif %}
-
-              {% if model.admin_url and show_changelinks %}
-                {% if model.view_only %}
-                  <td><a href="{{ model.admin_url }}" class="viewlink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'View' %}</a></td>
-                {% else %}
-                  {% if model.name == "Transactions" %}
-                      <td>
-                        <a href="{% url 'admin:transactions_upload_bill' %}" aria-describedby="{{ app.app_label }}-{{ model_name }}">📤 Upload</a>
-                      </td>
+              {% if model.name == "Analytics Dashboard" %}
+                <th scope="row" id="{{ app.app_label }}-{{ model_name }}">
+                  {% if model.admin_url %}
+                    <a href="{{ model.admin_url }}analytics_dashboard"{% if model.admin_url in request.path|urlencode %} aria-current="page"{% endif %}>{{ model.name }}</a>
                   {% else %}
-                      <td><a href="{{ model.admin_url }}" class="changelink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Change' %}</a></td>
+                    {{ model.name }}
                   {% endif %}
+                  <td></td>
+                  <td></td>
+                </th>
+              {% else %}
+                <th scope="row" id="{{ app.app_label }}-{{ model_name }}">
+                  {% if model.admin_url %}
+                    <a href="{{ model.admin_url }}"{% if model.admin_url in request.path|urlencode %} aria-current="page"{% endif %}>{{ model.name }}</a>
+                  {% else %}
+                    {{ model.name }}
+                  {% endif %}
+                </th>
+
+                {% if model.add_url %}
+                  <td><a href="{{ model.add_url }}" class="addlink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Add' %}</a></td>
+                {% else %}
+                  <td></td>
                 {% endif %}
-              {% elif show_changelinks %}
-                <td></td>
+
+                {% if model.admin_url and show_changelinks %}
+                  {% if model.view_only %}
+                    <td><a href="{{ model.admin_url }}" class="viewlink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'View' %}</a></td>
+                  {% else %}
+                    {% if model.name == "Transactions" %}
+                        <td>
+                          <a href="{% url 'admin:transactions_upload_bill' %}" aria-describedby="{{ app.app_label }}-{{ model_name }}">📤 Upload</a>
+                        </td>
+                    {% else %}
+                        <td><a href="{{ model.admin_url }}" class="changelink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Change' %}</a></td>
+                    {% endif %}
+                  {% endif %}
+                {% elif show_changelinks %}
+                  <td></td>
+                {% endif %}
               {% endif %}
             </tr>
           {% endwith %}

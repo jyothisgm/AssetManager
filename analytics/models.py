@@ -1,3 +1,6 @@
 from django.db import models
 
-# Create your models here.
+class AnalyticsDummyModel(models.Model):
+    class Meta:
+        verbose_name = "Analytics Dashboard"
+        verbose_name_plural = "Analytics Dashboard"
