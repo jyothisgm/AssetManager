@@ -38,9 +38,9 @@ class AnalyticsAdmin(admin.ModelAdmin):
 
             # --- Filter transactions ---
             if view_type == "annual":
-                transactions = Transaction.objects.filter(date__year=year)
+                transactions = Transaction.objects.filter(date__year=year, created_by=request.user)
             else:
-                transactions = Transaction.objects.filter(date__year=year, date__month=month)
+                transactions = Transaction.objects.filter(date__year=year, date__month=month, created_by=request.user)
 
             # --- Currency-wise totals (income + expense) ---
             currency_summary = (
