@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from django.contrib import admin, messages
 from django.shortcuts import render, redirect
-from django.db.models import Sum, Case, When, F, Q, DecimalField
+from django.db.models import Sum, Case, When, F, Q, DecimalField, Value, ExpressionWrapper
 from django.urls import path
 from django.utils import timezone
 from django.utils.html import format_html
@@ -20,6 +20,7 @@ from transaction.models import Transaction, TransactionItem
 from transaction.invoice_handling import process_transaction_file
 from user.admin import RestrictedAdmin
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, DropdownFilter
+from django.db.models.functions import Coalesce
 
 from common.logging_config import logger
 from user.models import Attachment, get_attachment_type
@@ -150,37 +151,60 @@ class TransactionAdmin(RestrictedAdmin):
             obj.currency = obj.account.currency
         super().save_model(request, obj, form, change)
 
-
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
         response = super().changelist_view(request, extra_context=extra_context)
         try:
             queryset = response.context_data["cl"].queryset
+
+            # Define reusable decimal constants
+            dec0 = Value(0, output_field=DecimalField(max_digits=20, decimal_places=2))
+            dec_neg1 = Value(-1, output_field=DecimalField(max_digits=20, decimal_places=2))
+
             totals = (
-                queryset.values("currency__code")
+                queryset.values("account__name", "currency__code")
                 .annotate(
-                    total=Sum(
-                        Case(
-                            When(transaction_type__in=["credit", "transfer_credit"], then=F("amount")),
-                            When(transaction_type__in=["debit", "transfer_debit"], then=-F("amount")),
-                            default=0,
+                    total=Coalesce(
+                        Sum(
+                            Case(
+                                When(
+                                    transaction_type__in=["credit", "transfer_credit"],
+                                    then=ExpressionWrapper(F("amount"), output_field=DecimalField(max_digits=20, decimal_places=2)),
+                                ),
+                                When(
+                                    transaction_type__in=["debit", "transfer_debit"],
+                                    then=ExpressionWrapper(dec_neg1 * F("amount"), output_field=DecimalField(max_digits=20, decimal_places=2)),
+                                ),
+                                default=dec0,
+                                output_field=DecimalField(max_digits=20, decimal_places=2),
+                            ),
                             output_field=DecimalField(max_digits=20, decimal_places=2),
-                        )
+                        ),
+                        dec0,
                     )
                 )
-                .order_by("currency__code")
+                .order_by("account__name", "currency__code")
             )
 
-            if totals:
-                total_html = "<br>".join(
-                    f"<b>{row['currency__code']}</b>: {round(row['total'], 2):,}" for row in totals
-                )
+            if totals.exists():
+                html_lines = []
+
+                for row in totals:
+                    account = row["account__name"] or "—"
+                    currency = row["currency__code"] or ""
+                    total = round(row["total"], 2)
+                    html_lines.append(f"<b>{account}</b>: {total:,} {currency}")
+
+                total_html = "<br>".join(html_lines)
                 response.context_data["custom_totals"] = format_html(total_html)
-                logger.debug(f"[{func_name}] Calculated totals by currency: {totals}")
+                logger.debug(f"[{func_name}] Calculated totals by account and currency: {totals}")
+
         except Exception as e:
             logger.exception(f"[{func_name}] Error generating totals for transaction list")
             raise e
+
         return response
+
 
     def get_urls(self):
         urls = super().get_urls()

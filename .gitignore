@@ -183,6 +183,7 @@ __pypackages__/
 /media/
 staticfiles/
 *.jpeg
+deploy.zip
 
 # Logs
 *.log

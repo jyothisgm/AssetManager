@@ -147,11 +147,28 @@ az webapp up \
     --name "$APP_NAME" \
     --runtime "PYTHON|3.11" \
     --resource-group "$RESOURCE_GROUP" \
+    --src-path "$ZIP_FILE" \
     --sku F1 \
     --log
 
 rm "$ZIP_FILE" || true
 echo "🧹 Cleaned up temporary zip."
+
+# ===============================================
+# 🌍  DEPLOYMENT
+# ===============================================
+APP_NAME="asset-manager-django"
+RESOURCE_GROUP="asset-manager-rg"
+
+echo "📦 Preparing Git-tracked files for deployment..."
+git archive -o deploy.zip HEAD
+echo "✅ Created archive: deploy.zip"
+
+echo "🚀 Uploading to Azure..."
+az webapp deployment source config-zip \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$APP_NAME" \
+    --src deploy.zip
 
 # ===============================================
 # 🔧  CONFIGURE APP SETTINGS
