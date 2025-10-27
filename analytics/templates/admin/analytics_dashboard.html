@@ -3,99 +3,42 @@
 
 {% block content %}
 <style>
-/* Base layout */
+/* --- Layout --- */
 .navigator {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-    border-radius: 8px;
-    flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  border-radius: 8px;
+  flex-wrap: wrap;
 }
-
-/* Period control (month + year) */
 .nav-center {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 .nav-btn {
-    border: none;
-    color: #111827;
-    font-size: 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.2s;
-    background: var(--header-bg);
-    border: 1px solid var(--header-bg);
+  border: 1px solid var(--header-bg);
+  background: var(--header-bg);
+  color: #111827;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 10px;
 }
 .nav-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    text-align: center;
+  font-weight: 600;
+  font-size: 1.1rem;
 }
-
-/* Regular dropdown */
 .view-select {
+  border: 1px solid var(--header-bg);
   border-radius: 6px;
-  border: 1px solid  var(--header-bg);
   background: var(--header-bg);
   font-weight: 600;
   cursor: pointer;
 }
-.view-select:focus {
-  outline: none;
-  border-color: var(--header-bg);
-  box-shadow: 0 0 0 2px var(--header-bg);
-}
 
-/* Chart and table */
-.chart-table-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2rem;
-  align-items: flex-start;
-}
-.chart-box {
-  flex: 1;
-  max-width: 500px;
-  min-width: 280px;
-}
-
-/* Tablet (≤ 900px): make chart smaller */
-@media (max-width: 900px) {
-  .chart-box {
-    max-width: 400px;
-  }
-}
-.table-box {
-  flex: 1;
-}
-.stats-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.stats-table thead, .stats-table td {
-  padding: 8px;
-  text-align: left;
-}
-.stats-table thead th {
-  background: var(--header-bg);
-  color: white;
-}
-
-.stats-table tr:hover {
-  background: var(--selected-row);
-}
-
-.stats-table tr.selected {
-  background-color: var(--selected-row, #e0f2fe);  /* fallback: light blue */
-  font-weight: 600;
-}
-
-.tab-header {
-  margin-bottom: 1rem;
-}
+/* --- Tabs --- */
+.tab-header { margin-bottom: 1rem; }
 .tab-button {
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -106,207 +49,189 @@
 }
 .tab-button.active {
   background: var(--header-bg);
-  border: 1px solid var(--header-bg);
   color: white;
 }
-.tab-content {
-  display: none;
-  margin-top: 1rem;
-}
+.tab-content { display: none; margin-top: 1rem; }
+
+/* --- Summary --- */
 .summary-line {
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
   gap: 2rem;
   flex-wrap: wrap;
 }
-
 .summary-line span {
   font-size: 1rem;
-  white-space: nowrap;         /* keeps each metric together */
+  white-space: nowrap;
+}
+
+/* --- Table --- */
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.stats-table th, .stats-table td {
+  padding: 8px;
+  text-align: left;
+}
+.stats-table thead th {
+  background: var(--header-bg);
+  color: white;
+}
+.stats-table tr:hover { background: var(--selected-row); }
+.stats-table tr.selected { background: var(--selected-row); font-weight: 600; }
+
+/* --- Chart + Table --- */
+.chart-table-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+}
+.chart-box { flex: 1; max-width: 500px; min-width: 280px; }
+.table-box { flex: 1; }
+
+.link_class {
+  color: var(--link-fg);
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
 }
 </style>
 
+<!-- ===== Navigator ===== -->
 <div class="navigator">
   <div class="nav-center">
     <button class="nav-btn" onclick="changePeriod(-1)">⟨</button>
     <span class="nav-value" id="periodLabel"></span>
     <button class="nav-btn" onclick="changePeriod(1)">⟩</button>
   </div>
-
-  <div>
-    <select id="viewDropdown" class="view-select" onchange="changeView(this.value)">
-      <option value="monthly" {% if view_type == 'monthly' %}selected{% endif %}>Monthly View</option>
-      <option value="annual" {% if view_type == 'annual' %}selected{% endif %}>Annual View</option>
-    </select>
-  </div>
+  <select id="viewDropdown" class="view-select" onchange="changeView(this.value)">
+    <option value="monthly" {% if view_type == 'monthly' %}selected{% endif %}>Monthly</option>
+    <option value="annual" {% if view_type == 'annual' %}selected{% endif %}>Annual</option>
+  </select>
 </div>
 
-
-<script>
-const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-let currentView = "{{ view_type }}";
-let currentMonth = parseInt("{{ month }}");
-let currentYear = parseInt("{{ year }}");
-
-function updateLabel() {
-  const label = document.getElementById("periodLabel");
-  label.textContent = currentView === "monthly"
-    ? `${monthNames[currentMonth]} ${currentYear}`
-    : `${currentYear}`;
-}
-
-function updateNavigator() {
-  const params = new URLSearchParams(window.location.search);
-  params.set("view", currentView);
-  params.set("year", currentYear);
-  if (currentView === "monthly") params.set("month", currentMonth);
-  else params.delete("month");
-  window.location.href = window.location.pathname + "?" + params.toString();
-}
-
-function changePeriod(step) {
-  if (currentView === "monthly") {
-    currentMonth += step;
-    if (currentMonth < 1) { currentMonth = 12; currentYear--; }
-    if (currentMonth > 12) { currentMonth = 1; currentYear++; }
-  } else {
-    currentYear += step;
-  }
-  updateNavigator();
-}
-
-function changeView(value) {
-  currentView = value;
-  updateNavigator();
-}
-
-document.addEventListener("DOMContentLoaded", updateLabel);
-</script>
-
-
-<!-- Currency Tabs -->
+<!-- ===== Currency Tabs ===== -->
 <div class="tab-header">
   {% for c in currency_summary %}
-    <button class="tab-button" onclick="showTab('{{ c.currency__code|default:'-' }}')">
+    <button class="tab-button" id="button-{{ c.currency__code|default:'—' }}" onclick="showTab('{{ c.currency__code|default:'-' }}')">
       {{ c.currency__code|default:"—" }}
     </button>
   {% endfor %}
 </div>
 
-<!-- Each currency tab -->
+<!-- ===== Currency Panels ===== -->
 {% for c in currency_summary %}
-    <div id="tab-{{ c.currency__code|default:'-' }}" class="tab-content">
-        <div class="summary-line">
-            <span>
-                💰 Transfers: {{ c.transfers|floatformat:2 }} {{ c.currency__code|default:"" }}
-            </span>
-            <span>
-                💰 Income: {{ c.income|floatformat:2 }} {{ c.currency__code|default:"" }}
-            </span>
-            <span>
-                💸 Expenses: {{ c.expenses|floatformat:2 }} {{ c.currency__code|default:"" }}
-            </span>
-        </div>
-        <div class="chart-table-container">
-        <div class="chart-box">
-            <canvas id="chart-{{ c.currency__code|default:'-' }}"></canvas>
-        </div>
+<div id="tab-{{ c.currency__code|default:'-' }}" class="tab-content">
+  <div class="summary-line">
+    <span>💰 Transfers: {{ c.transfers|floatformat:2 }} {{ c.currency__code|default:"" }}</span>
+    <span>💰 Income: {{ c.income|floatformat:2 }} {{ c.currency__code|default:"" }}</span>
+    <span>💸 Expenses: {{ c.expenses|floatformat:2 }} {{ c.currency__code|default:"" }}</span>
+  </div>
 
-        <div class="table-box">
-            <table class="stats-table">
-            <thead>
-                <tr><th>Category</th><th>Amount</th><th>Percent</th></tr>
-            </thead>
-            <tbody>
-                {% for row in category_totals_by_currency %}
-                  {% if row.currency__code == c.currency__code %}
-                    <tr onclick="showTransactions('{{ row.category__name|escapejs }}', '{{ row.currency__code|escapejs }}')" style="cursor:pointer;">
-                        <td>{{ row.category__name|default:"—" }}</td>
-                        <td>{{ row.total|floatformat:2 }}</td>
-                        <td>{{ row.percent }}%</td>
-                    </tr>
-                  {% endif %}
-                {% endfor %}
-            </tbody>
-            </table>
-        </div>
-        </div>
+  <div class="chart-table-container">
+    <div class="chart-box">
+      <canvas id="chart-{{ c.currency__code|default:'-' }}"></canvas>
     </div>
+    <div class="table-box">
+      <div class="tab-header">
+        <button class="tab-button" id="button-{{ c.currency__code }}-debit" onclick="showTab('{{ c.currency__code }}', 'debit')">Debit</button>
+        <button class="tab-button" id="button-{{ c.currency__code }}-credit" onclick="showTab('{{ c.currency__code }}', 'credit')">Credit</button>
+      </div>
+
+      {% include "admin/partials/_category_table.html" with type="debit" rows=category_totals_by_currency_debit currency=c.currency__code %}
+      {% include "admin/partials/_category_table.html" with type="credit" rows=category_totals_by_currency_credit currency=c.currency__code %}
+
+    </div>
+  </div>
+</div>
 {% endfor %}
 
 <div id="transactionsContainer"></div>
 
+<!-- ===== Scripts ===== -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-function showTransactions(category, currency) {
+const monthNames = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+let currentView = "{{ view_type }}";
+let currentMonth = parseInt("{{ month }}");
+let currentYear = parseInt("{{ year }}");
+let activeChart = null;
+const chartDebitData = {{ currency_chart_data_debit|safe }};
+const chartCreditData = {{ currency_chart_data_credit|safe }};
+
+/* --- Navigation --- */
+function updateLabel() {
+  const label = document.getElementById("periodLabel");
+  label.textContent = currentView === "monthly"
+    ? `${monthNames[currentMonth]} ${currentYear}` : `${currentYear}`;
+}
+function updateNavigator() {
+  const params = new URLSearchParams({view: currentView, year: currentYear});
+  if (currentView === "monthly") params.set("month", currentMonth);
+  window.location.href = `${window.location.pathname}?${params}`;
+}
+function changePeriod(step) {
+  if (currentView === "monthly") {
+    currentMonth += step;
+    if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+    if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  } else currentYear += step;
+  updateNavigator();
+}
+function changeView(value) { currentView = value; updateNavigator(); }
+
+/* --- Transactions --- */
+function showTransactions(category, currency, type) {
   const params = new URLSearchParams({
-    category,
-    currency,
-    view: "{{ view_type }}",
-    month: "{{ month }}",
-    year: "{{ year }}"
+    category, currency, view: "{{ view_type }}",
+    month: "{{ month }}", year: "{{ year }}", transaction_type: type
   });
-    // --- Highlight selected row ---
   document.querySelectorAll('.stats-table tr').forEach(tr => tr.classList.remove('selected'));
-  const clickedRow = event.currentTarget;
-  clickedRow.classList.add('selected');
+  event.currentTarget.classList.add('selected');
 
-  const url = "{% url 'admin:analytics_transactions_block' %}?" + params.toString();
-
-  fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+  fetch("{% url 'admin:analytics_transactions_block' %}?" + params, {headers: {"X-Requested-With": "XMLHttpRequest"}})
     .then(r => r.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
       document.getElementById("transactionsContainer").innerHTML = data.html;
-      document.getElementById("transactionsContainer").scrollIntoView({ behavior: "smooth" });
+      document.getElementById("transactionsContainer").scrollIntoView({behavior:"smooth"});
     })
-    .catch(err => {
-      console.error(err);
-      alert("Error loading transactions: " + err.message);
-    });
+    .catch(err => alert("Error loading transactions: " + err.message));
 }
-</script>
 
-<!-- ChartJS -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-const chartData = {{ currency_chart_data|safe }};
-let activeChart = null;
-
-function showTab(code) {
+/* --- Tabs & Charts --- */
+function showTab(code, type) {
   document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
   document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-  const tab = document.getElementById('tab-' + code);
-  tab.style.display = 'block';
-  event.target.classList.add('active');
+  document.getElementById(`tab-${code}`).style.display = 'block';
+  document.getElementById(`button-${code}`).classList.add('active');
 
-  const ctx = document.getElementById('chart-' + code);
-  if (activeChart) activeChart.destroy();
+  const chartData = (type === 'credit') ? chartCreditData : chartDebitData;
+  const ctx = document.getElementById(`chart-${code}`);
+  const tab = document.getElementById(`tab-${code}-${type || 'debit'}`);
   if (!chartData[code]) return;
+
+  tab.style.display = 'block';
+  document.getElementById(`button-${code}-${type || 'debit'}`).classList.add('active');
+  if (activeChart) activeChart.destroy();
 
   activeChart = new Chart(ctx, {
     type: 'pie',
     data: {
       labels: chartData[code].labels,
-      datasets: [{
-        data: chartData[code].totals,
-        backgroundColor: ['#f87171','#fbbf24','#34d399','#60a5fa','#a78bfa','#f472b6'],
-      }]
+      datasets: [{ data: chartData[code].totals,
+        backgroundColor: ['#f87171','#fbbf24','#34d399','#60a5fa','#a78bfa','#f472b6'] }]
     },
     options: {
-      plugins: {
-        title: { display: true, text: code + ' Expense Breakdown' },
-        legend: { position: 'bottom' }
-      }
+      plugins: { title: {display:true, text:`${code} Expense Breakdown`}, legend: {position:'bottom'} }
     }
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const firstBtn = document.querySelector('.tab-button');
+/* --- Init --- */
+document.addEventListener("DOMContentLoaded", () => {
+  updateLabel();
+  const firstBtn = document.querySelector(".tab-button");
   if (firstBtn) firstBtn.click();
 });
 </script>
-
 {% endblock %}

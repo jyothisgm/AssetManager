@@ -15,9 +15,9 @@
         <tbody>
         {% for t in selected_transactions %}
         <tr onclick="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')" style="cursor:pointer;">
-            <th class="nowrap"><a href="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')">{{ t.date|date:"Y-m-d" }}</a></th>
+            <th class="link_class"><a>{{ t.date|date:"d-M-Y H:i" }}</a></th>
             <td>{{ t.account.name|default:"—" }}</td>
-            <th class="nowrap"><a href="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')">{{ t.store.name|default:"—" }}</a></th>
+            <th class="link_class"><a>{{ t.store.name|default:"—" }}</a></th>
             <td>{{ t.category.name|default:"—" }}</td>
             <td style="text-align:right;">{{ t.amount|floatformat:2 }}</td>
         </tr>

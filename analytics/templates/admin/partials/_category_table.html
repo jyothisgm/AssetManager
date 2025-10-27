@@ -1,0 +1,17 @@
+{# admin/partials/_category_table.html #}
+<div id="tab-{{ currency }}-{{ type }}" class="tab-content">
+    <table class="stats-table">
+        <thead><tr><th>Category</th><th>Amount</th><th>%</th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+            {% if row.currency__code == currency %}
+            <tr onclick="showTransactions('{{ row.category__name|escapejs }}', '{{ row.currency__code|escapejs }}', '{{ type }}')">
+                <td>{{ row.category__name|default:"—" }}</td>
+                <td>{{ row.total|floatformat:2 }}</td>
+                <td>{{ row.percent }}%</td>
+            </tr>
+            {% endif %}
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
