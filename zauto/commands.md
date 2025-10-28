@@ -89,3 +89,20 @@ az sql server firewall-rule create \
   --name AllowLocalIP \
   --start-ip-address $(curl -s https://api.ipify.org) \
   --end-ip-address $(curl -s https://api.ipify.org)
+
+az webapp show \           
+  --name asset-manager-django \          
+  --resource-group asset-manager-rg \                                                                                                                              
+  -o tsv                                    
+
+az appservice plan create \
+  --name asset-manager-free-plan \       
+  --resource-group asset-manager-rg \                                                                                                                              
+  --sku F1 \                                
+  --is-linux \
+  --location "France Central"
+
+az webapp update \
+  --name asset-manager-django \
+  --resource-group asset-manager-rg \
+  --set serverFarmId="/subscriptions/7be0d741-5dc6-4c53-be1c-c52dcdd8b49e/resourceGroups/asset-manager-rg/providers/Microsoft.Web/serverfarms/asset-manager-free-plan"

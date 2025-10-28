@@ -1,4 +1,4 @@
-from catalog.models import Brand, Product, Store, ProductCategory
+from catalog.models import Brand, Product, Store, PurchaseCategory
 from common.logging_config import logger
 from django.db import transaction
 
@@ -7,7 +7,7 @@ from django.db import transaction
 # STORES
 # ============================================================
 
-def get_or_create_store(raw_name: str, normalized_name: str | None = None, category: ProductCategory | None = None) -> Store | None:
+def get_or_create_store(raw_name: str, normalized_name: str | None = None, category: PurchaseCategory | None = None) -> Store | None:
     if not raw_name and not normalized_name:
         logger.warning("[get_or_create_store] Missing both raw_name and normalized_name → returning None")
         return None
