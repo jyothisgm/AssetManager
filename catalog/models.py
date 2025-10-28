@@ -227,17 +227,29 @@ class Store(BaseUserModel):
         return self.preferred or self
 
     def __str__(self):
-        if self.preferred:
-            label = self.preferred.name
-            cats = list(self.preferred.categories.all()[:2])
-            if cats:
-                label += " (" + ", ".join(c.name for c in cats) + ")"
-        else:
-            label = self.name
-            cats = list(self.categories.all()[:2])
-            if cats:
-                label += " (" + ", ".join(c.name for c in cats) + ")"
-        return label
+        try:
+            # Prefer preferred.name if available
+            if self.preferred_id:
+                label = getattr(self.preferred, "name", "(unnamed)")
+                # Only access categories if preferred is saved
+                if self.preferred_id:
+                    cats_qs = getattr(self.preferred, "categories", None)
+                    if cats_qs is not None and self.preferred.pk:
+                        cats = list(cats_qs.all()[:2])
+                        if cats:
+                            label += " (" + ", ".join(c.name for c in cats) + ")"
+            else:
+                label = self.name or "(unnamed)"
+                if self.pk:  # Only safe after save
+                    cats_qs = getattr(self, "categories", None)
+                    if cats_qs is not None:
+                        cats = list(cats_qs.all()[:2])
+                        if cats:
+                            label += " (" + ", ".join(c.name for c in cats) + ")"
+            return label
+        except Exception:
+            # Fallback if anything goes wrong during saving/logging
+            return getattr(self, "name", "(unsaved)")
 
 
 # ============================================================
