@@ -120,6 +120,7 @@ class TransactionAdmin(RestrictedAdmin):
         ("account", RelatedOnlyDropdownFilter),
         ("category", RelatedOnlyDropdownFilter),
         ("store", RelatedOnlyDropdownFilter),
+        ("created_by", RelatedOnlyDropdownFilter),
     )
     fieldsets = (
         ("📄 Basic Details", {
@@ -449,7 +450,8 @@ class TransactionItemAdmin(RestrictedAdmin):
                         "product__preferred__name", "product__brand__preferred__name", "product__brand__name")
     list_filter = (
         ("unit", RelatedOnlyDropdownFilter), 
-        ProductCategoryDropdownFilter
+        ProductCategoryDropdownFilter,
+        ("created_by", RelatedOnlyDropdownFilter),
     )
     ordering = ("-date",)
     autocomplete_fields = ("transaction", "product", "unit")

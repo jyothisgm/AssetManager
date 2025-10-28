@@ -1,44 +1,49 @@
-from catalog.models import Brand, Product, Store
+from catalog.models import Brand, Product, Store, ProductCategory
 from common.logging_config import logger
+from django.db import transaction
 
 
 # ============================================================
 # STORES
 # ============================================================
-def get_or_create_store(raw_name: str, normalized_name: str | None = None) -> Store | None:
-    """
-    Find or create a Store using both raw and normalized names.
-    """
+
+def get_or_create_store(raw_name: str, normalized_name: str | None = None, category: ProductCategory | None = None) -> Store | None:
     if not raw_name and not normalized_name:
         logger.warning("[get_or_create_store] Missing both raw_name and normalized_name → returning None")
         return None
 
-    normalized_name = normalized_name or raw_name
+    raw_name = raw_name.strip()
+    normalized_name = (normalized_name or raw_name).strip()
 
     try:
-        # 1️⃣ Try to find existing store with the raw name
-        store = Store.objects.filter(name__iexact=raw_name).first()
-        if store:
-            logger.debug(f"[get_or_create_store] Found existing store '{raw_name}' (id={store.id})")
-            return store
+        with transaction.atomic():
+            # 1️⃣ Check existing store by raw name
+            store = Store.objects.filter(name__iexact=raw_name).first()
+            if store:
+                logger.debug(f"[get_or_create_store] Found existing store '{raw_name}' (id={store.id})")
+                return store
 
-        # 2️⃣ Find or create the preferred store using normalized_name
-        preferred_store = Store.objects.filter(name__iexact=normalized_name).first()
-        if not preferred_store:
-            preferred_store = Store.objects.create(name=normalized_name)
-            logger.info(f"[get_or_create_store] Created new preferred store '{normalized_name}' (id={preferred_store.id})")
+            # 2️⃣ Find or create preferred
+            preferred_store, created = Store.objects.get_or_create(
+                name__iexact=normalized_name,
+                defaults={"name": normalized_name}
+            )
+            if created:
+                logger.info(f"[get_or_create_store] Created new preferred store '{normalized_name}' (id={preferred_store.id})")
+            if category:
+                preferred_store.categories.add(category)
 
-        # 3️⃣ Create a variant if raw_name differs
-        if raw_name.lower() != normalized_name.lower():
-            store = Store.objects.create(name=raw_name, preferred=preferred_store)
-            logger.info(f"[get_or_create_store] Created variant store '{raw_name}' → preferred '{normalized_name}'")
-            return store
+            # 3️⃣ Create variant if raw_name differs
+            if raw_name.lower() != normalized_name.lower():
+                if not Store.objects.filter(name__iexact=raw_name).exists():
+                    store = Store.objects.create(name=raw_name, preferred=preferred_store)
+                    logger.info(f"[get_or_create_store] Created variant store '{raw_name}' → preferred '{normalized_name}'")
+                    return store
 
-        # 4️⃣ If same name, just return preferred
-        return preferred_store
+            return preferred_store
 
-    except Exception as e:
-        logger.warning(f"[get_or_create_store] Error creating store for '{raw_name}' → {e}", exc_info=True)
+    except Exception:
+        logger.exception(f"[get_or_create_store] Error creating store for '{raw_name}'")
         return None
 
 

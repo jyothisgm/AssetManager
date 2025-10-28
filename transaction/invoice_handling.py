@@ -107,9 +107,15 @@ def process_transaction_file(transaction_file):
                     currency_code = (tx_data.get("currency") or "EUR").upper().strip()
                     currency_ref = Currency.objects.filter(code=currency_code).first()
 
+                    # Category handling
+                    category_name = tx_data.get("category") or "Others"
+                    category_ref = PurchaseCategory.objects.filter(name__iexact=category_name).first()
+                    if not category_ref:
+                        category_ref, _ = PurchaseCategory.objects.get_or_create(name="Others")
+
                     store_name_raw = tx_data.get("store_name_raw") or tx_data.get("store_name") or ""
                     store_name_normalized = tx_data.get("store_name_normalized") or store_name_raw
-                    store_ref = get_or_create_store(store_name_raw, store_name_normalized)
+                    store_ref = get_or_create_store(store_name_raw, store_name_normalized, category_ref)
 
                     # Parse date safely
                     date_val = None
@@ -122,12 +128,6 @@ def process_transaction_file(transaction_file):
                                 break
                             except ValueError:
                                 continue
-
-                    # Category handling
-                    category_name = tx_data.get("category") or "Others"
-                    category_ref = PurchaseCategory.objects.filter(name__iexact=category_name).first()
-                    if not category_ref:
-                        category_ref, _ = PurchaseCategory.objects.get_or_create(name="Others")
 
                     # Compute total
                     items = tx_data.get("items", [])
