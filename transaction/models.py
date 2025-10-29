@@ -14,12 +14,6 @@ import os
 from datetime import datetime
 
 
-
-def _to_cents(value: Decimal) -> int:
-    # compare in cents to avoid float noise
-    return int((value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100))
-
-
 def transaction_attachment_path(instance, filename):
     """
     Generates and ensures structured path for uploaded attachments.
@@ -175,6 +169,12 @@ class Transaction(BaseUserModel):
                 - txn_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             )
             new_status = diff <= tolerance
+
+            import math
+            frac_txn, whole_txn = math.modf(txn_amount)
+            if frac_txn == 0:
+                _, whole_items = math.modf(items_total)
+                new_status = whole_txn == whole_items or whole_txn == whole_items + 1
 
         if self.totals_match != new_status:
             self.totals_match = new_status

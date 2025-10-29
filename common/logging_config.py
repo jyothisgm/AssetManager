@@ -3,6 +3,27 @@ import logging
 import os
 import sys
 import traceback
+import threading
+
+
+# Thread-local storage to store current user for each request
+_user_local = threading.local()
+
+def set_current_user(user):
+    """Store current user in thread-local storage."""
+    _user_local.user = user
+
+def get_current_user():
+    """Retrieve current user if available."""
+    return getattr(_user_local, "user", None)
+
+class UserContextFilter(logging.Filter):
+    """Injects the current user into log records."""
+    def filter(self, record):
+        user = get_current_user()
+        record.user = getattr(user, "email", None) or getattr(user, "username", None) or "Anonymous"
+        return True
+
 
 class ExceptionFormatter(logging.Formatter):
     """
@@ -42,6 +63,8 @@ class ExceptionFormatter(logging.Formatter):
 
         # Base formatting (after removing traceback)
         base = super().format(record)
+        base = f"[User: {getattr(record, 'user', 'Anonymous')}] {base}"
+
         base += exc_text
 
         record.exc_info = exc_info_copy
@@ -49,55 +72,10 @@ class ExceptionFormatter(logging.Formatter):
         return base
 
 
-class ExceptionFormatter2(logging.Formatter):
-    """
-    Adds concise error context (file, line, code) for logger.exception()
-    but keeps full traceback for logger.error(..., exc_info=True) or Django internals.
-    """
-
-    def format(self, record):
-        base = super().format(record)
-
-        if record.exc_info:
-            exc_type, exc_value, tb = record.exc_info
-
-            # Extract the last frame (where exception occurred)
-            if tb:
-                frame = traceback.extract_tb(tb)[-1]
-                filename = os.path.basename(frame.filename)
-                line_number = frame.lineno
-                source_line = frame.line.strip() if frame.line else "(no source)"
-            else:
-                filename = record.filename
-                line_number = record.lineno
-                source_line = "(unknown source)"
-
-            # Detect if this came from logger.exception() (most likely your own code)
-            called_from_logger_exception = record.funcName == "exception"
-
-            if called_from_logger_exception:
-                # ✅ Your handled errors — no traceback, just concise info
-                base += (
-                    f"\n❌ {exc_type.__name__} in {filename}:{line_number}"
-                    f"\n   → {exc_value}"
-                    f"\n   🧩 Line: {source_line}"
-                )
-                record.exc_info = None  # Suppress traceback
-            else:
-                # ✅ Django/system errors — include traceback
-                tb_lines = "".join(traceback.format_exception(exc_type, exc_value, tb))
-                base += (
-                    f"\n💥 {exc_type.__name__} in {filename}:{line_number}"
-                    f"\n   → {exc_value}"
-                    f"\n   🧩 Line: {source_line}"
-                    f"\n📜 Traceback:\n{tb_lines}"
-                )
-
-        return base
-
-
 # Global uncaught exception hook
 logger = logging.getLogger("asset_manager")
+logger.addFilter(UserContextFilter())
+
 
 def log_uncaught_exceptions(exc_type, exc_value, tb):
     frame_info = traceback.extract_tb(tb)[-1] if tb else None

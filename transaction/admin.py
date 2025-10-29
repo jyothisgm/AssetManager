@@ -135,7 +135,7 @@ class TransactionAdmin(RestrictedAdmin):
             "classes": ("collapse",),
         }),
         ("📊 Computed / Status", {
-            "fields": ("total_from_items", "totals_match", "processed"),
+            "fields": ("view_attachment", "total_from_items", "totals_match", "processed"),
             "classes": ("collapse",),
         }),
     )

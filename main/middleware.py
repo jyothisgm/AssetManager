@@ -1,5 +1,5 @@
 import threading
-from common.logging_config import logger
+from common.logging_config import logger, set_current_user
 
 _user = threading.local()
 
@@ -45,3 +45,14 @@ class CurrentUserMiddleware:
             # Always clear thread-local storage to prevent leakage across requests
             _user.value = None
             logger.debug(f"[{func_name}] Cleared thread-local user reference")
+
+
+class UserLoggingMiddleware:
+    """Middleware to attach the current user to logs for each request."""
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        set_current_user(getattr(request, "user", None))
+        response = self.get_response(request)
+        return response
