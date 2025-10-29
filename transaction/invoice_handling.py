@@ -175,16 +175,22 @@ def process_transaction_file(transaction_file):
                             else:
                                 quantity = float(item.get("quantity", 1))
                         except Exception as e:
-                            logger.warning(f"[{func_name}] Unit conversion failed for {raw_name}: {e}", exc_info=True)
-                            quantity = float(item.get("quantity", 1))
-
+                            logger.warning(f"[{func_name}] Unit conversion or quantity fetch failed for {raw_name}: with quantity: \
+                                            {item.get("quantity", None)}  {e}", exc_info=True)
+                            quantity = 1
+                        try:
+                            price = float(item.get("price", 0))
+                        except Exception as e:
+                            logger.warning(f"[{func_name}] Price fetch failed for {raw_name}: with price: \
+                                                {item.get("price", None)}  {e}", exc_info=True)
+                            price = 0
                         parsed_items.append(
                             {
                                 "item_ref": item_ref,
                                 "brand_ref": brand_ref,
                                 "unit_ref": unit_ref,
                                 "quantity": quantity,
-                                "price": float(item.get("price", 0)),
+                                "price": price,
                                 "name_raw": raw_name,
                                 "name_normalized": norm_name,
                             }
