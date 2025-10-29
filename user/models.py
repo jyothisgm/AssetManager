@@ -9,8 +9,7 @@ import uuid
 import os
 from common.models import SoftDeleteManager, SoftDeleteQuerySet, TimeStampedModel
 from common.storage import get_dynamic_storage
-from main.middleware import get_current_user
-from common.logging_config import logger
+from common.logging_config import logger, get_current_user
 
 
 class UserManager(BaseUserManager):

@@ -8,8 +8,7 @@ from django.utils import timezone
 
 from ai.models import save_ai_request_with_attachment
 from ai.prompts import PROMPT_GET_INSTITUTION
-from main.middleware import get_current_user
-from common.logging_config import logger
+from common.logging_config import logger, get_current_user
 
 
 
