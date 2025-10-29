@@ -1,5 +1,0 @@
-[build]
-# Force Python detection and run these commands
-buildCommand = "python3.11 -m pip install --upgrade pip && pip install -r requirements.txt"
-postBuildCommand = "python manage.py migrate --noinput && python manage.py collectstatic --noinput"
-startCommand = "gunicorn main.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 600"
