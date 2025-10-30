@@ -15,6 +15,7 @@ from django.contrib.contenttypes.models import ContentType
 
 from account.models import Account
 from catalog.models import PurchaseCategory
+from common.models import Unit
 from transaction.admin_forms import TransactionItemInlineForm
 from transaction.models import Transaction, TransactionItem
 from transaction.invoice_handling import process_transaction_file
@@ -73,11 +74,6 @@ class TransactionItemInline(admin.TabularInline):
     autocomplete_fields = ("product", )
     show_change_link = False
 
-    class Media:
-        css = {
-            "all": ("admin/css/transaction_item_inline.css",)
-        }
-
     def brand_display(self, obj):
         return obj.product.brand.name if obj.product and obj.product.brand else "-"
     brand_display.short_description = "Brand"
@@ -91,6 +87,11 @@ class TransactionItemInline(admin.TabularInline):
                 return obj.product.category.name
         return "-"
     category_display.short_description = "Category"
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "unit":
+            kwargs["queryset"] = Unit.objects.filter(preferred=None)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 # -----------------------------------
@@ -205,7 +206,6 @@ class TransactionAdmin(RestrictedAdmin):
             raise e
 
         return response
-
 
     def get_urls(self):
         urls = super().get_urls()
@@ -465,3 +465,8 @@ class TransactionItemAdmin(RestrictedAdmin):
                 return obj.product.category.name
         return "-"
     product_category.short_description = "Category"
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "unit":
+            kwargs["queryset"] = Unit.objects.filter(preferred=None)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)

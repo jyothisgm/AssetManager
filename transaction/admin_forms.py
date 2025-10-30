@@ -36,6 +36,7 @@ class TransactionItemInlineForm(forms.ModelForm):
                 if not cat and getattr(instance.product, "preferred", None):
                     cat = getattr(instance.product.preferred, "category", None)
                 self.fields["category_display"].initial = cat
+                self.fields["unit"].label_from_instance = lambda obj: obj.symbol or obj.name
                 logger.debug(f"[{func_name}] Set initial brand={instance.product.brand}, category={cat}")
         except Exception as e:
             logger.warning(f"[{func_name}] Error initializing form for TransactionItem", exc_info=True)

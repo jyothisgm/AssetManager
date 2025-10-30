@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from catalog.models import CategoryGroup, ExchangeRateRecord, Institution, Product, PurchaseCategory, Brand, Store
+from common.models import Unit
 from user.admin import RestrictedAdmin, RestrictedViewAdmin
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, RelatedDropdownFilter
 from common.logging_config import logger
@@ -138,6 +139,8 @@ class ProductAdmin(RestrictedViewAdmin):
             if request.resolver_match.kwargs.get("object_id"):
                 current_id = request.resolver_match.kwargs["object_id"]
                 qs = qs.exclude(id=current_id)
+            if db_field.name == "unit":
+                kwargs["queryset"] = Unit.objects.filter(preferred=None)
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
