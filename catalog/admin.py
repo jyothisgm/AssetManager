@@ -139,9 +139,9 @@ class ProductAdmin(RestrictedViewAdmin):
             if request.resolver_match.kwargs.get("object_id"):
                 current_id = request.resolver_match.kwargs["object_id"]
                 qs = qs.exclude(id=current_id)
-            if db_field.name == "unit":
-                kwargs["queryset"] = Unit.objects.filter(preferred=None)
             kwargs["queryset"] = qs.order_by("name")
+        if db_field.name == "preferred_unit":
+            kwargs["queryset"] = Unit.objects.filter(preferred=None)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 

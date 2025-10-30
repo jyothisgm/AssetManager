@@ -62,6 +62,20 @@ class UnitAdmin(admin.ModelAdmin):
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
+    def get_search_results(self, request, queryset, search_term):
+        queryset, may_have_duplicates = super().get_search_results(request, queryset, search_term)
+
+        # This path is used by the admin's autocomplete endpoint
+        if request.path.endswith("/autocomplete/"):
+            # Only restrict when the requesting field is Product.preferred_unit
+            if request.GET.get("field_name") == "preferred_unit" and \
+                request.GET.get("app_label") == "catalog" and \
+                request.GET.get("model_name") == "product":
+                queryset = queryset.filter(preferred=None)
+
+        return queryset, may_have_duplicates
+
+
 
 # ------------------------------
 # CURRENCY ADMIN
