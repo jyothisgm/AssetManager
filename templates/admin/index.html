@@ -1,0 +1,12 @@
+{% extends "admin/index.html" %}
+{% load i18n %}
+
+{% block nav-breadcrumbs %}
+  <div class="breadcrumbs" style="position: relative;">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {{ block.super }}
+{% endblock %}

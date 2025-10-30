@@ -1,65 +1,94 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
-{% block content %}
-<h2>📸 Upload Transaction Receipt</h2>
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/forms.css' %}">
+  <link rel="stylesheet" href="{% static 'admin/css/widgets.css' %}">
+  <script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+  <script src="{% static 'admin/js/core.js' %}"></script>
+  <script src="{% static 'admin/js/admin/related-widget-wrapper.js' %}"></script>
+{% endblock %}
 
-<form method="post" enctype="multipart/form-data" style="margin-top: 20px;">
+{% block content %}
+<div class="form-container">
+  <h2>📸 Upload Transaction Receipt</h2>
+
+  <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
 
     <!-- Account selection -->
-    <label for="id_account"><strong>Select account:</strong></label><br>
-    <div style="display: flex; align-items: center; gap: 10px;">
-        <select name="account" id="id_account" required style="min-width: 250px; padding: 6px;">
-            <option value="">-- Choose Account --</option>
-            {% for acc in accounts %}
-                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.currency.code }})</option>
-            {% endfor %}
-        </select>
+    <div class="form-row">
+      <label for="id_account"><strong>Select account:</strong></label><br>
+<div class="account-select-wrapper">
+  <select name="account" id="id_account" required style="padding:6px;min-width:250px;">
+    <option value="">-- Choose Account --</option>
+    {% for acc in accounts %}
+      <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.currency.code }})</option>
+    {% endfor %}
+  </select>
 
-        <!-- Add Account button -->
-        <a href="{% url 'admin:account_account_add' %}?_popup=1"
-           class="button"
-           id="add_account_link"
-           style="background-color:#2196F3;color:white;padding:5px 10px;border-radius:4px;text-decoration:none;">
-            ➕ Add Account
-        </a>
+  <a href="{% url 'admin:account_account_add' %}?_popup=1"
+     class="related-widget-wrapper-link add-related addlink"
+     id="add_account_link"
+     title="Add Account"
+     data-popup="true">
+     Add Account
+  </a>
+</div>
     </div>
 
-    <br><br>
+    <br>
 
     <!-- File upload -->
-    <label for="id_image"><strong>Select or capture receipt image:</strong></label><br>
-    <input type="file" name="image" id="id_image" accept="image/*" required>
-    <input type="hidden" name="browser_timezone" id="id_browser_timezone">
-    <br><br>
+    <div class="form-row">
+      <label for="id_image"><strong>Select or capture receipt image / PDF:</strong></label><br>
+      <input type="file" name="image" id="id_image" accept="image/*,.pdf" required style="margin-top:6px;">
+      <input type="hidden" name="browser_timezone" id="id_browser_timezone">
+    </div>
 
-    <button type="submit" class="button default" style="background-color:#4CAF50;color:white;">
-        ⬆️ Upload
-    </button>
-    <a href=".." class="button cancel-link">Cancel</a>
-</form>
+    <br>
 
-<p style="margin-top:15px;color:#666;">
-    Supported formats: JPG, PNG.<br>
+    <!-- ✅ Submit row -->
+    <div class="submit-row">
+      <input type="submit" name="_save" class="default" value="⬆️ Upload">
+      <input type="button" class="button cancel-link" onclick="window.location.href='..';" value="✖ Cancel">
+    </div>
+  </form>
+
+  <p style="margin-top:15px;color:#666;">
+    Supported formats: JPG, PNG, PDF.<br>
     The system will automatically extract store, date, items, and amount from the receipt.
-</p>
+  </p>
+</div>
 
 <script>
-    // Set user's browser timezone name before form submission
-    document.addEventListener("DOMContentLoaded", () => {
-        const tzField = document.getElementById("id_browser_timezone");
-        if (tzField) tzField.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    });
+  document.addEventListener("DOMContentLoaded", () => {
+    const tzField = document.getElementById("id_browser_timezone");
+    if (tzField)
+      tzField.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  });
 
-    // Optional: auto-refresh the dropdown after adding a new account in popup
-    window.dismissAddRelatedObjectPopup = function (win, newId, newRepr) {
-        const select = document.getElementById("id_account");
-        if (select) {
-            const option = new Option(newRepr, newId, true, true);
-            select.add(option);
-        }
-        win.close();
-    };
+  // Manual popup for Django ≥5.0
+  document.addEventListener("click", e => {
+    const link = e.target.closest("a.add-related[data-popup='true']");
+    if (!link) return;
+    e.preventDefault();
+    const popup = window.open(
+      link.href,
+      link.title || "Add Account",
+      "height=600,width=900,resizable=yes,scrollbars=yes"
+    );
+    popup.focus();
+  });
+
+  window.dismissAddRelatedObjectPopup = function(win, newId, newRepr) {
+    const select = document.getElementById("id_account");
+    if (select) {
+      const option = new Option(newRepr, newId, true, true);
+      select.add(option);
+    }
+    win.close();
+  };
 </script>
 {% endblock %}

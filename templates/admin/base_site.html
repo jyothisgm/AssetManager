@@ -9,7 +9,7 @@
 {% block branding %}
     <div id="site-name">
         <a href="{% url 'admin:index' %}">
-        {{ site_header|default:_('Django administration') }}
+            {{ site_header|default:_('Django administration') }}
         </a>
     </div>
     {% if user.is_anonymous %}
@@ -25,23 +25,101 @@
             <a href="{{ site_url }}">{% trans 'View site' %}</a> |
         {% endif %}
         <a href="{% url 'admin:user_user_change' user.id %}">{% trans 'Edit profile' %}</a> |
-
         <form id="logout-form" method="post" action="{{ logout_url }}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;">
                 {% trans 'Log out' %}
             </button>
         </form>
-    {% else %}
-        {% if user.is_active %}
-            <form id="logout-form" method="post" action="{% url 'admin:logout' %}" style="display:inline;">
-                {% csrf_token %}
-                <button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;">
-                    {% trans 'Log out' %}
-                </button>
-            </form>
-        {% endif %}
     {% endif %}
 {% endblock %}
+{% block extrahead %}
+  {{ block.super }}
+  <style>
+    .global-admin-buttons {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      gap: 8px;
+      max-width: 50%; /* prevents overflow in long breadcrumb paths */
+      overflow: hidden;
+    }
 
-{% block nav-global %}{% endblock %}
+    .global-admin-buttons a {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      line-height: 24px;
+      text-decoration: none;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 80px;
+      max-width: 160px; /* controls truncation length */
+    }
+
+    .global-admin-buttons .addlink,
+    .global-admin-buttons .changelink {
+      background-position: left 6px center !important;
+      padding: 2px 10px 2px 26px !important;
+    }
+
+    /* ✅ Tooltip to show full text on hover */
+    .global-admin-buttons a[title] {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Responsive: move buttons below on small screens */
+    @media (max-width: 600px) {
+      .global-admin-buttons {
+        position: static;
+        transform: none;
+        margin-top: 0.5rem;
+        max-width: 100%;
+      }
+      .global-admin-buttons a {
+        width: 100%;
+        text-align: left;
+        padding-left: 30px !important;
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block footer %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const breadcrumbs = document.querySelector(".breadcrumbs");
+      if (!breadcrumbs) return;
+
+      if (document.querySelector(".global-admin-buttons")) return;
+
+      const buttons = document.createElement("div");
+      buttons.className = "global-admin-buttons";
+
+      // Add Transaction
+      const addBtn = document.createElement("a");
+      addBtn.href = "{% url 'admin:transaction_transaction_add' %}";
+      addBtn.className = "addlink";
+      addBtn.textContent = "Add Transaction";
+      addBtn.title = "Add Transaction"; // tooltip for truncated text
+      buttons.appendChild(addBtn);
+
+      // Upload Receipt
+      const uploadBtn = document.createElement("a");
+      uploadBtn.href = "{% url 'admin:transactions_upload_bill' %}";
+      uploadBtn.className = "changelink";
+      uploadBtn.textContent = "Upload Receipt";
+      uploadBtn.title = "Upload Receipt";
+      buttons.appendChild(uploadBtn);
+
+      breadcrumbs.style.position = "relative";
+      breadcrumbs.appendChild(buttons);
+    });
+  </script>
+{% endblock %}
