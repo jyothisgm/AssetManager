@@ -13,9 +13,9 @@ def get_or_create_unit(name: str):
 
         logger.debug(f"[{func_name}] Searching for unit with name or symbol='{name}' (case-insensitive)")
         unit = Unit.objects.filter(Q(name__iexact=name) | Q(symbol__iexact=name)).first()
-        if unit.preferred:
-            unit = unit.preferred
         if unit:
+            if unit.preferred:
+                unit = unit.preferred
             logger.info(f"[{func_name}] Found existing unit: {unit}")
         else:
             logger.warning(f"[{func_name}] Unit not found for '{name}'")
