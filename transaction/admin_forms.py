@@ -1,7 +1,10 @@
 from django import forms
-from transaction.models import TransactionItem
-from catalog.models import Brand, PurchaseCategory
+from account.models import Account
+from common.models import Currency, Unit
+from transaction.models import Transaction, TransactionItem
+from catalog.models import Brand, Product, PurchaseCategory, Store
 from common.logging_config import logger
+from dal import autocomplete
 
 
 class TransactionItemInlineForm(forms.ModelForm):
@@ -79,3 +82,93 @@ class TransactionItemInlineForm(forms.ModelForm):
         except Exception as e:
             logger.warning(f"[{func_name}] Error saving TransactionItem", exc_info=True)
             raise e
+
+
+class BulkEditTransactionForm(forms.Form):
+    """Form for bulk editing multiple Transactions with DAL searchable fields."""
+    transaction_type = forms.ChoiceField(
+        choices=[("", "----")] + Transaction.TRANSACTION_TYPES,
+        required=False,
+        label="Transaction Type",
+    )
+
+    currency = forms.ModelChoiceField(
+        queryset=Currency.objects.none(),
+        required=False,
+        label="Currency",
+        widget=autocomplete.ModelSelect2(
+            url="currency-autocomplete",
+            attrs={"data-placeholder": "Search currency..."},
+        ),
+    )
+
+    account = forms.ModelChoiceField(
+        queryset=Account.objects.none(),
+        required=False,
+        label="Account",
+        widget=autocomplete.ModelSelect2(
+            url="account-autocomplete",
+            attrs={"data-placeholder": "Search account..."},
+        ),
+    )
+
+    category = forms.ModelChoiceField(
+        queryset=PurchaseCategory.objects.none(),
+        required=False,
+        label="Category",
+        widget=autocomplete.ModelSelect2(
+            url="category-autocomplete",
+            attrs={"data-placeholder": "Search category..."},
+        ),
+    )
+
+    store = forms.ModelChoiceField(
+        queryset=Store.objects.none(),
+        required=False,
+        label="Store",
+        widget=autocomplete.ModelSelect2(
+            url="store-autocomplete",
+            attrs={"data-placeholder": "Search store..."},
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        request = kwargs.pop("request", None)
+        super().__init__(*args, **kwargs)
+        # Optionally restrict or reassign if user context needed
+        if request:
+            self.fields["account"].queryset = Account.objects.filter(created_by=request.user)
+            self.fields["store"].queryset = Store.objects.filter(preferred=None)
+            self.fields["category"].queryset = PurchaseCategory.objects.all()
+            self.fields["currency"].queryset = Currency.objects.all()
+
+
+class BulkEditTransactionItemForm(forms.Form):
+    """Form for bulk editing multiple Transactions with DAL searchable fields."""
+    product = forms.ModelChoiceField(
+        queryset=Product.objects.none(),
+        required=False,
+        label="Product",
+        widget=autocomplete.ModelSelect2(
+            url="product-autocomplete",
+            attrs={"data-placeholder": "Search product..."},
+        ),
+    )
+
+    unit = forms.ModelChoiceField(
+        queryset=Unit.objects.none(),
+        required=False,
+        label="Unit",
+        widget=autocomplete.ModelSelect2(
+            url="unit-autocomplete",
+            attrs={"data-placeholder": "Search Unit..."},
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        request = kwargs.pop("request", None)
+        super().__init__(*args, **kwargs)
+        # Optionally restrict or reassign if user context needed
+        if request:
+            self.fields["product"].queryset = Product.objects.filter(preferred=None)
+            self.fields["unit"].queryset = Unit.objects.filter(preferred=None)

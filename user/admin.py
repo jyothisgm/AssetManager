@@ -41,7 +41,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
                 allowed = obj.created_by == request.user
                 logger.debug(f"[{func_name}] {request.user.email} {'allowed' if allowed else 'denied'} to change {obj}")
                 return allowed
-            return True
+            return False
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking change permission")
             raise e
@@ -53,7 +53,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
                 allowed = obj.created_by == request.user
                 logger.debug(f"[{func_name}] {request.user.email} {'allowed' if allowed else 'denied'} to delete {obj}")
                 return allowed
-            return True
+            return False
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking delete permission")
             raise e

@@ -186,7 +186,7 @@ staticfiles/
 deploy.zip
 
 # Logs
-*.log
+*.log*
 
 # -------------------------------
 # Optional Tools / Frameworks

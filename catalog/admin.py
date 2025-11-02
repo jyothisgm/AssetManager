@@ -1,6 +1,8 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.shortcuts import redirect, render
 from django.utils.html import format_html
 
+from catalog.forms import BulkEditBrandForm, BulkEditProductForm, BulkEditStoreForm
 from catalog.models import CategoryGroup, ExchangeRateRecord, Institution, Product, PurchaseCategory, Brand, Store
 from common.models import Unit
 from user.admin import RestrictedAdmin, RestrictedViewAdmin
@@ -17,6 +19,7 @@ class BrandAdmin(RestrictedViewAdmin):
         ("preferred", RelatedOnlyDropdownFilter),
     )
     autocomplete_fields = ("preferred",)
+    actions = ["bulk_edit_brands"]
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "preferred":
@@ -27,6 +30,37 @@ class BrandAdmin(RestrictedViewAdmin):
                 qs = qs.exclude(id=current_id)
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def bulk_edit_brands(self, request, queryset):
+        """Bulk edit selected brands."""
+        queryset = queryset.filter(created_by=request.user)
+        if not queryset.exists():
+            self.message_user(request, "You can only edit objects you created.", level="error")
+            return redirect(request.get_full_path())
+        if "apply" in request.POST:
+            form = BulkEditBrandForm(request.POST, request=request)
+            if form.is_valid():
+                preferred = form.cleaned_data.get("preferred")
+                count = queryset.update(preferred=preferred)
+                messages.success(request, f"✅ Updated preferred brand for {count} brand(s).")
+                return redirect(request.get_full_path())
+        else:
+            form_initial = {}
+            if queryset.exists():
+                values = list(set(queryset.values_list("preferred", flat=True)))
+                if len(values) == 1:
+                    form_initial["preferred"] = values[0]
+            form = BulkEditBrandForm(request=request, initial=form_initial)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Bulk Edit Brands",
+            queryset=queryset,
+            form=form,
+            opts=self.model._meta,
+        )
+        return render(request, "admin/bulk_edit_brands.html", context)
+    bulk_edit_brands.short_description = "Edit selected brands"
 
 
 @admin.register(CategoryGroup)
@@ -59,6 +93,7 @@ class StoreAdmin(RestrictedViewAdmin):
         ("preferred", RelatedOnlyDropdownFilter),
         ("categories", RelatedOnlyDropdownFilter),
     )
+    actions = ["bulk_edit_stores"]
 
     def category_names(self, obj):
         # join all category names, or show "-" if none
@@ -82,6 +117,45 @@ class StoreAdmin(RestrictedViewAdmin):
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
+    def bulk_edit_stores(self, request, queryset):
+        """Bulk edit selected stores."""
+        queryset = queryset.filter(created_by=request.user)
+        if not queryset.exists():
+            self.message_user(request, "You can only edit objects you created.", level="error")
+            return redirect(request.get_full_path())
+        if "apply" in request.POST:
+            form = BulkEditStoreForm(request.POST, request=request)
+            if form.is_valid():
+                data = {k: v for k, v in form.cleaned_data.items() if v not in (None, "", [])}
+                count = 0
+                for obj in queryset:
+                    if "preferred" in data:
+                        obj.preferred = data["preferred"]
+                    if "categories" in data:
+                        obj.categories.set(data["categories"])
+                    obj.save()
+                    count += 1
+                messages.success(request, f"✅ Updated {count} store(s) successfully.")
+                return redirect(request.get_full_path())
+        else:
+            form_initial = {}
+            if queryset.exists():
+                for field_name in ["preferred"]:
+                    unique = list(set(queryset.values_list(field_name, flat=True)))
+                    if len(unique) == 1:
+                        form_initial[field_name] = unique[0]
+            form = BulkEditStoreForm(request=request, initial=form_initial)
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Bulk Edit Stores",
+            queryset=queryset,
+            form=form,
+            opts=self.model._meta,
+        )
+
+        return render(request, "admin/bulk_edit_stores.html", context)
+    bulk_edit_stores.short_description = "Edit selected stores"
+
 
 # ------------------------------
 # ITEM NAME ADMIN
@@ -104,6 +178,7 @@ class ProductAdmin(RestrictedViewAdmin):
     )
     autocomplete_fields = ("preferred", "brand", "preferred_unit", "category")
     ordering = ("name",)
+    actions = ["bulk_edit_products"]
 
     # --- Display helpers ---
     def brand_display(self, obj):
@@ -144,6 +219,43 @@ class ProductAdmin(RestrictedViewAdmin):
             kwargs["queryset"] = Unit.objects.filter(preferred=None)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
+    def bulk_edit_products(self, request, queryset):
+        """Bulk edit selected products."""
+        queryset = queryset.filter(created_by=request.user)
+        if not queryset.exists():
+            self.message_user(request, "You can only edit objects you created.", level="error")
+            return redirect(request.get_full_path())
+
+        if "apply" in request.POST:
+            form = BulkEditProductForm(request.POST, request=request)
+            if form.is_valid():
+                data = {k: v for k, v in form.cleaned_data.items() if v not in (None, "", [])}
+                count = 0
+                for obj in queryset:
+                    for field, value in data.items():
+                        setattr(obj, field, value)
+                    obj.save()
+                    count += 1
+                messages.success(request, f"✅ Updated {count} product(s) successfully.")
+                return redirect(request.get_full_path())
+        else:
+            form_initial = {}
+            if queryset.exists():
+                for field_name in ["preferred", "brand", "preferred_unit", "category"]:
+                    unique = list(set(queryset.values_list(field_name, flat=True)))
+                    if len(unique) == 1:
+                        form_initial[field_name] = unique[0]
+            form = BulkEditProductForm(request=request, initial=form_initial)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Bulk Edit Products",
+            queryset=queryset,
+            form=form,
+            opts=self.model._meta,
+        )
+        return render(request, "admin/bulk_edit_products.html", context)
+    bulk_edit_products.short_description = "Edit selected products"
 
 # ------------------------------
 # INSTITUTION ADMIN

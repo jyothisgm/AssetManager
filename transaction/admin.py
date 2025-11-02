@@ -12,11 +12,12 @@ from django.utils import timezone
 from django.utils.html import format_html
 from rangefilter.filters import DateRangeFilter
 from django.contrib.contenttypes.models import ContentType
+from django.template.response import TemplateResponse
 
 from account.models import Account
 from catalog.models import PurchaseCategory
 from common.models import Unit
-from transaction.admin_forms import TransactionItemInlineForm
+from transaction.admin_forms import BulkEditTransactionForm, TransactionItemInlineForm
 from transaction.models import Transaction, TransactionItem
 from transaction.invoice_handling import process_transaction_file
 from user.admin import RestrictedAdmin
@@ -60,7 +61,6 @@ class ProductCategoryDropdownFilter(admin.SimpleListFilter):
                 Q(product__category_id=value) | Q(product__preferred__category_id=value)
             )
         return queryset
-
 
 
 # -----------------------------------
@@ -146,6 +146,46 @@ class TransactionAdmin(RestrictedAdmin):
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
+    actions = ["bulk_edit_transactions"]
+
+    def bulk_edit_transactions(self, request, queryset):
+        """Bulk-edit selected transactions with DAL autocomplete support."""
+        if "apply" in request.POST:
+            form = BulkEditTransactionForm(request.POST, request=request)
+            if form.is_valid():
+                data = {k: v for k, v in form.cleaned_data.items() if v not in (None, "", [])}
+                count = 0
+                for obj in queryset:
+                    for field, value in data.items():
+                        setattr(obj, field, value)
+                    obj.save()
+                    count += 1
+
+                messages.success(request, f"✅ Updated {count} transaction(s) successfully.")
+                return redirect(request.get_full_path())
+        else:
+            form_initial = {}
+
+            if queryset.exists():
+                for field_name in ["transaction_type", "currency", "account", "category", "store"]:
+                    values = list(queryset.values_list(field_name, flat=True))
+                    unique_values = list(set(values))  # deduplicate manually
+                    if len(unique_values) == 1:
+                        shared_value = unique_values[0]
+                        form_initial[field_name] = shared_value
+                    else:
+                        form_initial[field_name] = None
+            form = BulkEditTransactionForm(request=request, initial=form_initial)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Bulk Edit Transactions",
+            queryset=queryset,
+            form=form,
+            opts=self.model._meta,
+        )
+        return render(request, "admin/transaction_bulk_edit.html", context)
+    bulk_edit_transactions.short_description = "Edit selected transactions"
     
     def save_model(self, request, obj, form, change):
         """Automatically set currency from selected account if not manually chosen."""
@@ -155,7 +195,15 @@ class TransactionAdmin(RestrictedAdmin):
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
+        # ⚠️ If this is a POST from an admin action (like bulk_edit_transactions),
+        # skip the totals logic completely — let Django admin handle the action.
+        if request.method == "POST" and "action" in request.POST:
+            return super().changelist_view(request, extra_context)
+
+        # Otherwise proceed with your normal totals calculation
         response = super().changelist_view(request, extra_context=extra_context)
+        if not isinstance(response, TemplateResponse):
+            return response
         try:
             queryset = response.context_data["cl"].queryset
 
@@ -190,7 +238,6 @@ class TransactionAdmin(RestrictedAdmin):
 
             if totals.exists():
                 html_lines = []
-
                 for row in totals:
                     account = row["account__name"] or "—"
                     currency = row["currency__code"] or ""
@@ -455,6 +502,7 @@ class TransactionItemAdmin(RestrictedAdmin):
     )
     ordering = ("-date",)
     autocomplete_fields = ("transaction", "product", "unit")
+    actions = ["bulk_edit_transaction_items"]
 
     def product_category(self, obj):
         if obj.product:
@@ -470,3 +518,42 @@ class TransactionItemAdmin(RestrictedAdmin):
         if db_field.name == "unit":
             kwargs["queryset"] = Unit.objects.filter(preferred=None)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+    
+    def bulk_edit_transaction_items(self, request, queryset):
+        """Bulk edit selected TransactionItems."""
+        from transaction.admin_forms import BulkEditTransactionItemForm  # safe import here
+
+        if "apply" in request.POST:
+            selected_ids = request.POST.getlist("_selected_action")
+            queryset = self.model.objects.filter(pk__in=selected_ids)
+            form = BulkEditTransactionItemForm(request.POST, request=request)
+            if form.is_valid():
+                data = {k: v for k, v in form.cleaned_data.items() if v not in (None, "", [])}
+                count = 0
+                for obj in queryset:
+                    for field, value in data.items():
+                        setattr(obj, field, value)
+                    obj.save()
+                    count += 1
+                self.message_user(request, f"✅ Updated {count} transaction item(s) successfully.")
+                return redirect(request.get_full_path())
+        else:
+            # Prefill if all selected have the same value
+            form_initial = {}
+            if queryset.exists():
+                for field_name in ["product", "unit"]:
+                    values = list(queryset.values_list(field_name, flat=True))
+                    unique_values = list(set(values))
+                    if len(unique_values) == 1:
+                        form_initial[field_name] = unique_values[0]
+            form = BulkEditTransactionItemForm(request=request, initial=form_initial)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Bulk Edit Transaction Items",
+            queryset=queryset,
+            form=form,
+            opts=self.model._meta,
+        )
+        return render(request, "admin/transaction_item_bulk_edit.html", context)
+    bulk_edit_transaction_items.short_description = "Edit selected transaction items"

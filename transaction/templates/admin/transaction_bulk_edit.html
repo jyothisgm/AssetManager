@@ -1,0 +1,55 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+    <link rel="stylesheet" href="{% static 'admin/css/forms.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/widgets.css' %}">
+    <script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+    <script src="{% static 'admin/js/vendor/select2/select2.full.min.js' %}"></script>
+    <script src="{% url 'admin:jsi18n' %}"></script>
+    {{ block.super }}
+    {{ form.media }}
+{% endblock %}
+
+{% block content %}
+<p>You selected <b>{{ queryset.count }}</b> transaction(s):</p>
+<div class="delete-confirmation">
+<form method="POST" id="bulk_edit_form" novalidate action="">
+  {% csrf_token %}
+  <div>
+    <fieldset class="module aligned">
+
+      {% for obj in queryset %}
+        <input type="hidden" name="_selected_action" value="{{ obj.pk }}">
+      {% endfor %}
+      <input type="hidden" name="action" value="bulk_edit_transactions">
+      <input type="hidden" name="select_across" value="0">
+      <input type="hidden" name="index" value="0">
+
+      {% for field in form.visible_fields %}
+        <div class="form-row field-{{ field.name }}">
+          <div>
+            <div class="flex-container">
+              <label {% if field.field.required %}class="required"{% endif %} for="{{ field.id_for_label }}">
+                {{ field.label }}:
+              </label>
+              {{ field }}
+              {% if field.errors %}
+                <ul class="errorlist">{{ field.errors }}</ul>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </fieldset>
+
+    <div class="submit-row">
+      <input type="submit" value="Save" class="default" style="background: var(--default-button-bg);" name="apply">
+      <a href="{% url 'admin:transaction_transaction_changelist' %}" class="button cancel-link">
+        Cancel
+      </a>
+    </div>
+  </div>
+</form>
+</div>
+{% endblock %}

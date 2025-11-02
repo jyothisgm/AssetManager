@@ -1,6 +1,5 @@
 {% extends "admin/base.html" %}
 {% load i18n static %}
-
 {% block title %}
     {% if subtitle %}{{ subtitle }} | {% endif %}
     {{ title }} | {{ site_title|default:_('Django site admin') }}
@@ -35,6 +34,7 @@
 {% endblock %}
 {% block extrahead %}
   {{ block.super }}
+  <link rel="icon" type="image/png" href="{% static 'images/logo.svg' %}">
   <style>
     .global-admin-buttons {
       position: absolute;
