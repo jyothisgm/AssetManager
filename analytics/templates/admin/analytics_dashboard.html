@@ -208,11 +208,12 @@ function showTab(code, type) {
   const chartData = (type === 'credit') ? chartCreditData : chartDebitData;
   const ctx = document.getElementById(`chart-${code}`);
   const tab = document.getElementById(`tab-${code}-${type || 'debit'}`);
-  if (!chartData[code]) return;
 
   tab.style.display = 'block';
   document.getElementById(`button-${code}-${type || 'debit'}`).classList.add('active');
+
   if (activeChart) activeChart.destroy();
+  if (!chartData[code]) return;
 
   activeChart = new Chart(ctx, {
     type: 'pie',

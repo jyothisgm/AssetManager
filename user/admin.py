@@ -1,18 +1,68 @@
 from django.contrib import admin
 from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.urls import reverse
 from .models import Attachment, User, Role
 from common.logging_config import logger
 from django.contrib import messages
 from django.utils.translation import gettext_lazy as _
 from django.contrib.admin.sites import site
 from django.utils.safestring import mark_safe
+from django.utils.html import format_html
+from django.template.response import TemplateResponse
+from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter
+from django.contrib.admin import SimpleListFilter
+from django.contrib.contenttypes.models import ContentType
 
 
 
 admin.site.site_header = "Asset Manager Admin"
 admin.site.site_title = "Asset Manager Portal"
 admin.site.index_title = "Welcome to the Asset Manager Dashboard"
+
+class UsedTypeFilter(SimpleListFilter):
+    title = "type"
+    parameter_name = "type"
+
+    def lookups(self, request, model_admin):
+        # Return only distinct types in DB
+        if not request.user.is_superuser:
+            values = model_admin.model.objects.filter(created_by=request.user).values_list("type", flat=True).distinct()
+        else:
+            values = model_admin.model.objects.values_list("type", flat=True).distinct()
+        return [(v, v) for v in values if v]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(type=self.value())
+        return queryset
+
+
+class UsedContentTypeFilter(SimpleListFilter):
+    title = "content type"
+    parameter_name = "content_type"
+
+    def lookups(self, request, model_admin):
+        if not request.user.is_superuser:
+            used_ids = (
+                model_admin.model.objects.values_list("content_type", flat=True)
+                .filter(created_by=request.user)
+                .exclude(content_type__isnull=True)
+                .distinct()
+            )
+        else:
+            used_ids = (
+                model_admin.model.objects.values_list("content_type", flat=True)
+                .exclude(content_type__isnull=True)
+                .distinct()
+            )
+        types = ContentType.objects.filter(id__in=used_ids)
+        return [(t.id, t.name.title()) for t in types]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(content_type=self.value())
+        return queryset
 
 
 class RestrictedViewAdmin(admin.ModelAdmin):
@@ -40,6 +90,27 @@ class RestrictedViewAdmin(admin.ModelAdmin):
             logger.exception(f"[{func_name}] Error saving object by {request.user.email}")
             raise e
 
+    @admin.display(description="", ordering=False)
+    def action_checkbox(self, obj):
+        """
+        Override Django's built-in action_checkbox column.
+        Render checkbox only if the user is allowed to act on this object.
+        """
+        request = getattr(self, "_request_cache", None)
+        if not request:
+            return ""
+        if request.user.is_superuser or getattr(obj, "created_by_id", None) == request.user.id:
+            return format_html(
+                '<input type="checkbox" name="_selected_action" value="{}" class="action-select">',
+                obj.pk,
+            )
+        return ""
+
+    def changelist_view(self, request, extra_context=None):
+        """Cache request for use inside custom_action_checkbox."""
+        self._request_cache = request
+        return super().changelist_view(request, extra_context)
+
     def has_change_permission(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.has_change_permission"
         try:
@@ -47,7 +118,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
                 allowed = obj.created_by == request.user
                 logger.debug(f"[{func_name}] {request.user.email} {'allowed' if allowed else 'denied'} to change {obj}")
                 return allowed
-            return False
+            return True
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking change permission")
             raise e
@@ -59,7 +130,7 @@ class RestrictedViewAdmin(admin.ModelAdmin):
                 allowed = obj.created_by == request.user
                 logger.debug(f"[{func_name}] {request.user.email} {'allowed' if allowed else 'denied'} to delete {obj}")
                 return allowed
-            return False
+            return True
         except Exception as e:
             logger.exception(f"[{func_name}] Error checking delete permission")
             raise e
@@ -109,7 +180,6 @@ class RestrictedAdmin(RestrictedViewAdmin):
                     )
 
         return super().formfield_for_manytomany(db_field, request, **kwargs)
-
 
 
 @admin.register(User)
@@ -171,7 +241,7 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(Role)
 class RoleAdmin(admin.ModelAdmin):
     list_display = ("name", "description")
-    filter_horizontal = ("permissions",)  # ✅ better UI for permissions
+    filter_horizontal = ("permissions",)
 
 
 # ------------------------------
@@ -188,7 +258,7 @@ class AttachmentAdmin(RestrictedAdmin):
         "source_url",
         "created_at",
     )
-    list_filter = ("type", "content_type")
+    list_filter = (UsedTypeFilter, UsedContentTypeFilter, ("created_by", RelatedOnlyDropdownFilter))
     search_fields = ("description", "source_url", "text_content")
     readonly_fields = ("created_at", "modified_at")
 

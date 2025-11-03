@@ -19,7 +19,7 @@ class BrandAdmin(RestrictedViewAdmin):
         ("preferred", RelatedOnlyDropdownFilter),
     )
     autocomplete_fields = ("preferred",)
-    actions = ["bulk_edit_brands"]
+    actions = ["edit_selected"]
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "preferred":
@@ -31,7 +31,7 @@ class BrandAdmin(RestrictedViewAdmin):
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    def bulk_edit_brands(self, request, queryset):
+    def edit_selected(self, request, queryset):
         """Bulk edit selected brands."""
         queryset = queryset.filter(created_by=request.user)
         if not queryset.exists():
@@ -60,7 +60,7 @@ class BrandAdmin(RestrictedViewAdmin):
             opts=self.model._meta,
         )
         return render(request, "admin/bulk_edit_brands.html", context)
-    bulk_edit_brands.short_description = "Edit selected brands"
+    edit_selected.short_description = "Edit selected brands"
 
 
 @admin.register(CategoryGroup)
@@ -93,7 +93,7 @@ class StoreAdmin(RestrictedViewAdmin):
         ("preferred", RelatedOnlyDropdownFilter),
         ("categories", RelatedOnlyDropdownFilter),
     )
-    actions = ["bulk_edit_stores"]
+    actions = ["edit_selected"]
 
     def category_names(self, obj):
         # join all category names, or show "-" if none
@@ -117,7 +117,7 @@ class StoreAdmin(RestrictedViewAdmin):
             kwargs["queryset"] = qs.order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    def bulk_edit_stores(self, request, queryset):
+    def edit_selected(self, request, queryset):
         """Bulk edit selected stores."""
         queryset = queryset.filter(created_by=request.user)
         if not queryset.exists():
@@ -154,7 +154,7 @@ class StoreAdmin(RestrictedViewAdmin):
         )
 
         return render(request, "admin/bulk_edit_stores.html", context)
-    bulk_edit_stores.short_description = "Edit selected stores"
+    edit_selected.short_description = "Edit selected stores"
 
 
 # ------------------------------
@@ -178,7 +178,7 @@ class ProductAdmin(RestrictedViewAdmin):
     )
     autocomplete_fields = ("preferred", "brand", "preferred_unit", "category")
     ordering = ("name",)
-    actions = ["bulk_edit_products"]
+    actions = ["edit_selected"]
 
     # --- Display helpers ---
     def brand_display(self, obj):
@@ -219,7 +219,7 @@ class ProductAdmin(RestrictedViewAdmin):
             kwargs["queryset"] = Unit.objects.filter(preferred=None)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    def bulk_edit_products(self, request, queryset):
+    def edit_selected(self, request, queryset):
         """Bulk edit selected products."""
         queryset = queryset.filter(created_by=request.user)
         if not queryset.exists():
@@ -255,7 +255,7 @@ class ProductAdmin(RestrictedViewAdmin):
             opts=self.model._meta,
         )
         return render(request, "admin/bulk_edit_products.html", context)
-    bulk_edit_products.short_description = "Edit selected products"
+    edit_selected.short_description = "Edit selected products"
 
 # ------------------------------
 # INSTITUTION ADMIN

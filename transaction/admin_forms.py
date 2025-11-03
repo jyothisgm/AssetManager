@@ -233,5 +233,3 @@ class TransactionForm(forms.ModelForm):
                 self.fields["fee_amount"].initial = instance.fee.amount
             elif linked.fee and not self.initial.get("fee_amount"):
                 self.fields["fee_amount"].initial = linked.fee.amount
-
-

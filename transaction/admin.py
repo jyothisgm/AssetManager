@@ -163,9 +163,9 @@ class TransactionAdmin(RestrictedAdmin):
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
-    actions = ["bulk_edit_transactions"]
+    actions = ["edit_selected"]
 
-    def bulk_edit_transactions(self, request, queryset):
+    def edit_selected(self, request, queryset):
         """Bulk-edit selected transactions with DAL autocomplete support."""
         if "apply" in request.POST:
             form = BulkEditTransactionForm(request.POST, request=request)
@@ -202,7 +202,7 @@ class TransactionAdmin(RestrictedAdmin):
             opts=self.model._meta,
         )
         return render(request, "admin/transaction_bulk_edit.html", context)
-    bulk_edit_transactions.short_description = "Edit selected transactions"
+    edit_selected.short_description = "Edit selected transactions"
     
     def save_model(self, request, obj, form, change):
         """Automatically set currency from selected account if not manually chosen."""
@@ -216,7 +216,7 @@ class TransactionAdmin(RestrictedAdmin):
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
-        # ⚠️ If this is a POST from an admin action (like bulk_edit_transactions),
+        # ⚠️ If this is a POST from an admin action (like edit_selected),
         # skip the totals logic completely — let Django admin handle the action.
         if request.method == "POST" and "action" in request.POST:
             return super().changelist_view(request, extra_context)
@@ -678,6 +678,9 @@ class TransactionAdmin(RestrictedAdmin):
             else:
                 exchange_rate_record = None  # enforce rule for same-currency
 
+            if not cross_currency:
+                mirror_amount = _D(obj.amount or 0) 
+
             # -------------------------------
             # Mirror creation (preserve your mapping)
             # -------------------------------
@@ -701,7 +704,6 @@ class TransactionAdmin(RestrictedAdmin):
             mirror.account               = mirror_account
             mirror.date                  = obj.date
             mirror.category              = obj.category
-            mirror.description           = obj.description or f"Mirror of {obj.id}"
             mirror.currency              = to_currency
             mirror.exchange_rate_record  = exchange_rate_record
             mirror.fee                   = fee_tx
@@ -741,7 +743,7 @@ class TransactionItemAdmin(RestrictedAdmin):
     )
     ordering = ("-date",)
     autocomplete_fields = ("transaction", "product", "unit")
-    actions = ["bulk_edit_transaction_items"]
+    actions = ["edit_selected"]
 
     def product_category(self, obj):
         if obj.product:
@@ -758,7 +760,7 @@ class TransactionItemAdmin(RestrictedAdmin):
             kwargs["queryset"] = Unit.objects.filter(preferred=None)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
-    def bulk_edit_transaction_items(self, request, queryset):
+    def edit_selected(self, request, queryset):
         """Bulk edit selected TransactionItems."""
         if "apply" in request.POST:
             selected_ids = request.POST.getlist("_selected_action")
@@ -793,4 +795,4 @@ class TransactionItemAdmin(RestrictedAdmin):
             opts=self.model._meta,
         )
         return render(request, "admin/transaction_item_bulk_edit.html", context)
-    bulk_edit_transaction_items.short_description = "Edit selected transaction items"
+    edit_selected.short_description = "Edit selected transaction items"
