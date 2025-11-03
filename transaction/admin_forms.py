@@ -172,3 +172,66 @@ class BulkEditTransactionItemForm(forms.Form):
         if request:
             self.fields["product"].queryset = Product.objects.filter(preferred=None)
             self.fields["unit"].queryset = Unit.objects.filter(preferred=None)
+
+
+class TransactionForm(forms.ModelForm):
+    to_account = forms.ModelChoiceField(
+        queryset=Account.objects.none(),
+        required=False,
+        label="To Account",
+        widget=autocomplete.ModelSelect2(
+            url="account-autocomplete",
+            attrs={
+                "data-placeholder": "Search to account…",
+            },
+        ),
+    )
+    fee_amount = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        label="Fee amount",
+        help_text="Transfer fee in source currency (optional)."
+    )
+    to_amount = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        label="To amount",
+    )
+
+    class Meta:
+        model = Transaction
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        # Capture the request (admin passes it through `get_form` or formfield_for_* methods)
+        super().__init__(*args, **kwargs)
+        request = getattr(self, 'request', None)
+
+        # If we have access to the request, limit account choices
+        if request and request.user.is_authenticated:
+            self.fields["to_account"].queryset = Account.objects.filter(created_by=request.user)
+        else:
+            # fallback (in case request is missing)
+            self.fields["to_account"].queryset = Account.objects.none()
+
+        instance = kwargs.get("instance")
+        if instance and instance.linked_transaction_id:
+            linked = instance.linked_transaction
+
+            # Prefill "to_account"
+            if linked.account_id:
+                self.fields["to_account"].initial = linked.account
+
+            # Prefill "to_amount"
+            if linked.amount:
+                self.fields["to_amount"].initial = linked.amount
+
+            # Prefill "fee_amount"
+            if instance.fee and not self.initial.get("fee_amount"):
+                self.fields["fee_amount"].initial = instance.fee.amount
+            elif linked.fee and not self.initial.get("fee_amount"):
+                self.fields["fee_amount"].initial = linked.fee.amount
+
+

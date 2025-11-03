@@ -1,8 +1,10 @@
+from decimal import Decimal, InvalidOperation
 import mimetypes
 import os
 import uuid
 import pytz
 from datetime import timedelta
+from datetime import date
 
 from django.contrib import admin, messages
 from django.shortcuts import render, redirect
@@ -13,20 +15,34 @@ from django.utils.html import format_html
 from rangefilter.filters import DateRangeFilter
 from django.contrib.contenttypes.models import ContentType
 from django.template.response import TemplateResponse
+from django.http import JsonResponse
 
 from account.models import Account
-from catalog.models import PurchaseCategory
+from catalog.exchange_rate import fetch_market_rate
+from catalog.models import ExchangeRateRecord, Institution, PurchaseCategory, Store
 from common.models import Unit
-from transaction.admin_forms import BulkEditTransactionForm, TransactionItemInlineForm
+from transaction.admin_forms import BulkEditTransactionForm, TransactionForm, TransactionItemInlineForm
 from transaction.models import Transaction, TransactionItem
 from transaction.invoice_handling import process_transaction_file
 from user.admin import RestrictedAdmin
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, DropdownFilter
 from django.db.models.functions import Coalesce
+from django.db import transaction as db_transaction
 
 from common.logging_config import logger
 from user.models import Attachment, get_attachment_type
 
+from transaction.admin_forms import BulkEditTransactionItemForm  # safe import here
+
+
+def _D(val):
+    """Safe Decimal: None/'' -> 0"""
+    try:
+        if val is None or val == "":
+            return Decimal("0")
+        return Decimal(val)
+    except Exception:
+        return Decimal("0")
 
 class ProductCategoryDropdownFilter(admin.SimpleListFilter):
     title = "Product Category"
@@ -125,7 +141,7 @@ class TransactionAdmin(RestrictedAdmin):
     )
     fieldsets = (
         ("📄 Basic Details", {
-            "fields": ( "date", "account", "transaction_type", "amount", "category", "store"),
+            "fields": ( "date", "transaction_type", "account", "to_account", "amount", "fee_amount", "to_amount", "store", "category",),
         }),
         ("🏦 Extra", {
             "fields": ("currency", "description", "notes", "attachment"),
@@ -142,7 +158,8 @@ class TransactionAdmin(RestrictedAdmin):
     )
 
     ordering = ("-date",)
-    readonly_fields = ("processed", "view_attachment", "created_at", "modified_at", "total_from_items", "totals_match")
+    readonly_fields = ("linked_transaction", "fee", "exchange_rate_record", "processed", "view_attachment",
+                        "created_at", "modified_at", "total_from_items", "totals_match")
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
@@ -189,9 +206,13 @@ class TransactionAdmin(RestrictedAdmin):
     
     def save_model(self, request, obj, form, change):
         """Automatically set currency from selected account if not manually chosen."""
-        if obj.account and not obj.currency:
-            obj.currency = obj.account.currency
         super().save_model(request, obj, form, change)
+        to_account = form.cleaned_data.get("to_account")
+        fee_amount = form.cleaned_data.get("fee_amount")
+        to_amount = form.cleaned_data.get("to_amount")
+        print(to_amount, obj.amount)
+        if obj.transaction_type and "transfer" in obj.transaction_type and to_account:
+            self.handle_transfer_transaction(request, obj, to_account, fee_amount, to_amount)
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
@@ -258,6 +279,8 @@ class TransactionAdmin(RestrictedAdmin):
         urls = super().get_urls()
         custom_urls = [
             path("upload-bill/", self.admin_site.admin_view(self.upload_bill_view), name="transactions_upload_bill"),
+            path("ajax/get-currency/", self.admin_site.admin_view(self.get_currency_from_account), name="transaction_get_currency"),
+            path("ajax/get-category/", self.admin_site.admin_view(self.get_category_from_store), name="transaction_get_category"),
         ]
         return custom_urls + urls
 
@@ -485,6 +508,222 @@ class TransactionAdmin(RestrictedAdmin):
 
     view_attachment.short_description = "Invoice"
 
+    def get_currency_from_account(self, request):
+        """Return currency for a selected account."""
+        account_id = request.GET.get("account_id")
+        if not account_id:
+            return JsonResponse({"error": "No account id provided"}, status=400)
+        try:
+            account = Account.objects.select_related("currency").get(id=account_id)
+            return JsonResponse({
+                "currency_id": account.currency.id if account.currency else None,
+                "currency_name": account.currency.code if account.currency else None,
+            })
+        except Account.DoesNotExist:
+            return JsonResponse({"error": "Invalid account id"}, status=404)
+
+    def get_category_from_store(self, request):
+        """Return category for a selected store."""
+        store_id = request.GET.get("store_id")
+        if not store_id:
+            return JsonResponse({"error": "No store id provided"}, status=400)
+        try:
+            from catalog.models import Store  # import locally
+            store = Store.objects.get(id=store_id)
+            category = (
+                store.preferred.categories.first()[0] if store.preferred and store.preferred.categories.first()
+                else store.categories.first()
+            )
+            return JsonResponse({
+                "category_id": category.id if category else None,
+                "category_name": category.name if category else None,
+            })
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    def get_form(self, request, obj=None, **kwargs):
+        kwargs["form"] = TransactionForm
+        form = super().get_form(request, obj, **kwargs)
+        form.request = request
+        return form
+
+    @db_transaction.atomic
+    def handle_transfer_transaction(self, request, obj, to_account, fee_amount, to_amount):
+        """
+        PRESERVES your original mapping of from/to/mirror accounts and amounts.
+        Adds: safe Decimal conversion + skip fee/exrate for same-currency transfers.
+        """
+        func_name = f"{self.__class__.__name__}.handle_transfer_transaction"
+        try:
+            # -------------------------------
+            # Your original mapping (unchanged)
+            # -------------------------------
+            if obj.transaction_type == "transfer_debit":
+                mirror_type    = "transfer_credit"
+                from_currency  = getattr(obj.account, "currency", None)
+                to_currency    = getattr(to_account, "currency", None)
+                to_amount      = _D(to_amount)                 # keep caller's to_amount
+                from_amount    = _D(obj.amount or 0)          # from-side amount on this obj
+                from_account   = obj.account
+                mirror_account = to_account
+                mirror_amount  = to_amount
+            elif obj.transaction_type == "transfer_credit":
+                mirror_type    = "transfer_debit"
+                to_currency    = getattr(obj.account, "currency", None)
+                from_currency  = getattr(to_account, "currency", None)
+                from_amount    = _D(to_amount)                # your original: from_amount <- to_amount
+                to_amount      = _D(obj.amount or 0)          # to-side amount on this obj
+                from_account   = to_account
+                to_account     = obj.account                  # preserve your reassignment
+                mirror_account = from_account
+                mirror_amount  = from_amount
+            else:
+                return  # not a transfer
+
+            logger.info(
+                f"[{func_name}] {obj.transaction_type}: "
+                f"{from_account}({from_currency}) -> {mirror_account}({to_currency}); "
+                f"from_amount={from_amount}, mirror_amount={mirror_amount}"
+            )
+
+            # -------------------------------
+            # Same-currency rule
+            # -------------------------------
+            cross_currency = bool(from_currency and to_currency and from_currency != to_currency)
+
+            # -------------------------------
+            # Fee (only if cross-currency)
+            # -------------------------------
+            fee_tx = getattr(obj, "fee", None)
+            fee_amount = _D(fee_amount)
+
+            if cross_currency and fee_amount > 0:
+                fee_percent = (float(fee_amount) / float(from_amount)) * 100 if from_amount else 0.0
+                bank_fee_category = PurchaseCategory.objects.filter(name__iexact="Bank Fee").first()
+                conversion_store  = Store.objects.filter(name__iexact="Conversion Fees").first()
+
+                if not fee_tx:
+                    fee_tx = Transaction.objects.create(
+                        created_by=request.user,
+                        account=from_account,
+                        transaction_type="debit",
+                        amount=fee_amount,
+                        date=obj.date,
+                        currency=from_currency,
+                        category=bank_fee_category,
+                        store=conversion_store,
+                        description=f"Transfer fee for {obj.id}",
+                    )
+                    logger.info(f"[{func_name}] Created fee transaction {fee_tx.id} for {obj.id}")
+                else:
+                    fee_tx.account = from_account
+                    fee_tx.amount = fee_amount
+                    fee_tx.currency = from_currency
+                    fee_tx.category = bank_fee_category
+                    fee_tx.store = conversion_store
+                    fee_tx.date = obj.date
+                    fee_tx.description = f"Transfer fee for {obj.id}"
+                    fee_tx.save()
+            else:
+                fee_percent = 0.0
+                fee_tx = None  # explicitly none for same-currency
+
+            # -------------------------------
+            # Exchange rate (only if cross-currency)
+            # -------------------------------
+            exchange_rate_record = getattr(obj, "exchange_rate_record", None)
+            if cross_currency:
+                try:
+                    # your original provider rate direction: from_amount / to_amount_on_other_side
+                    denom = mirror_amount if obj.transaction_type == "transfer_debit" else to_amount
+                    denom = denom if denom else Decimal("1")
+                    provider_rate = (from_amount / denom).quantize(Decimal("0.0001"))
+
+                    market_rate = fetch_market_rate(
+                        base_code=getattr(from_currency, "code", str(from_currency)),
+                        quote_code=getattr(to_currency, "code", str(to_currency)),
+                        date_obj=obj.date or date.today(),
+                    )
+
+                    if not exchange_rate_record:
+                        exchange_rate_record = ExchangeRateRecord.objects.create(
+                            base_currency=from_currency,
+                            quote_currency=to_currency,
+                            provider_rate=provider_rate,
+                            market_rate=market_rate,
+                            fee_percent=fee_percent,
+                            created_by=request.user,
+                            date=obj.date,
+                        )
+
+                    provider = None
+                    if getattr(obj, "store", None):
+                        provider, _ = Institution.objects.get_or_create(
+                            short_name__iexact=obj.store.name,
+                            defaults={"short_name": obj.store.name.strip(), "created_by": request.user},
+                        )
+
+                    exchange_rate_record.base_currency   = from_currency
+                    exchange_rate_record.quote_currency  = to_currency
+                    exchange_rate_record.provider_rate   = provider_rate
+                    exchange_rate_record.market_rate     = market_rate
+                    exchange_rate_record.fee_percent     = fee_percent
+                    exchange_rate_record.provider        = provider
+                    exchange_rate_record.date            = obj.date
+                    exchange_rate_record.save()
+                except (InvalidOperation, ZeroDivisionError) as e:
+                    logger.warning(f"[{func_name}] Invalid rate computation: {e}")
+                except Exception as e:
+                    logger.warning(f"[{func_name}] Could not create/update ExchangeRateRecord: {e}", exc_info=True)
+            else:
+                exchange_rate_record = None  # enforce rule for same-currency
+
+            # -------------------------------
+            # Mirror creation (preserve your mapping)
+            # -------------------------------
+            mirror = obj.linked_transaction
+            if not mirror:
+                mirror = (
+                    Transaction.objects.filter(linked_transaction=obj).first()
+                    or Transaction.objects.create(
+                        created_by=request.user,
+                        account=mirror_account,
+                        transaction_type=mirror_type,
+                        linked_transaction=obj,
+                        amount=_D(mirror_amount),            # ensure NOT NULL
+                        currency=to_currency,                # mirror currency is the "to" side
+                    )
+                )
+                obj.linked_transaction = mirror
+
+            # Update mirror in place
+            mirror.transaction_type      = mirror_type
+            mirror.account               = mirror_account
+            mirror.date                  = obj.date
+            mirror.category              = obj.category
+            mirror.description           = obj.description or f"Mirror of {obj.id}"
+            mirror.currency              = to_currency
+            mirror.exchange_rate_record  = exchange_rate_record
+            mirror.fee                   = fee_tx
+            mirror.store                 = obj.store
+            mirror.amount                = _D(mirror_amount)
+            mirror.linked_transaction    = obj
+            mirror.processed             = True
+            mirror.save()
+
+            # -------------------------------
+            # Update original
+            # -------------------------------
+            obj.linked_transaction      = mirror
+            obj.fee                     = fee_tx
+            obj.exchange_rate_record    = exchange_rate_record
+            obj.save(update_fields=["exchange_rate_record", "fee", "linked_transaction"])
+
+            self.message_user(request, "✅ Mirror and related records created/updated successfully.")
+
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error handling transfer for {obj.id}: {e}")
+            self.message_user(request, f"⚠️ Error creating mirror/fee/exchange records: {e}", level="error")
 
 # -----------------------------------
 # TRANSACTION ITEM ADMIN
@@ -521,8 +760,6 @@ class TransactionItemAdmin(RestrictedAdmin):
     
     def bulk_edit_transaction_items(self, request, queryset):
         """Bulk edit selected TransactionItems."""
-        from transaction.admin_forms import BulkEditTransactionItemForm  # safe import here
-
         if "apply" in request.POST:
             selected_ids = request.POST.getlist("_selected_action")
             queryset = self.model.objects.filter(pk__in=selected_ids)

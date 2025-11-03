@@ -261,7 +261,6 @@ class ExchangeRateRecord(BaseUserModel):
     Immutable record of an exchange rate used during a transfer or cross-currency transaction.
     Stored as metadata inside Transaction (no reverse relation).
     """
-
     base_currency = models.ForeignKey(
         Currency,
         related_name="base_exchange_records",
@@ -274,7 +273,6 @@ class ExchangeRateRecord(BaseUserModel):
         on_delete=models.PROTECT,
         help_text="Currency being converted to",
     )
-
     market_rate = models.DecimalField(
         max_digits=20,
         decimal_places=8,

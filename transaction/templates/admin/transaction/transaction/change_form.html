@@ -1,0 +1,171 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+
+    // --- Cached DOM elements ---
+    const txType        = document.getElementById('id_transaction_type');
+    const accountSel    = document.getElementById('id_account');
+    const toAccountSel  = document.getElementById('id_to_account');
+    const storeSel      = document.getElementById('id_store');
+    const currencySel   = document.getElementById('id_currency');
+    const categorySel   = document.getElementById('id_category');
+    const feeField      = document.getElementById('id_fee_amount');
+    const toAmountField = document.getElementById('id_to_amount');
+
+    // Labels
+    const accountLabel  = document.querySelector("label[for='id_account']");
+    const toAccountLabel= document.querySelector("label[for='id_to_account']");
+    const amountLabel   = document.querySelector("label[for='id_amount']");
+    const feeLabel      = document.querySelector("label[for='id_fee_amount']");
+    const toAmountLabel = document.querySelector("label[for='id_to_amount']");
+
+    // Field containers
+    const feeRow        = feeField ? feeField.closest('.form-row, .form-group, .field-box') : null;
+    const toAccountRow  = toAccountSel ? toAccountSel.closest('.form-row, .form-group, .field-box') : null;
+    const toAmountRow   = toAmountField ? toAmountField.closest('.form-row, .form-group, .field-box') : null;
+
+    // --- State ---
+    let fromCurrency = null;
+    let toCurrency   = null;
+
+    /* ============================
+        Utility helpers
+    ============================ */
+    function fetchJSON(url, cb) {
+        fetch(url)
+            .then(r => (r.ok ? r.json() : Promise.reject()))
+            .then(d => cb(d))
+            .catch(() => cb({}));
+    }
+
+    function fetchCurrency(accountId, cb) {
+        if (!accountId) return cb(null);
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency/?account_id=${accountId}`, data => {
+            cb(data.currency_name || null);
+        });
+    }
+
+    function setSelectValue(selectEl, value, text) {
+        if (!selectEl || !value) return;
+        if ($ && $(selectEl).data('select2')) {
+            if (!$(selectEl).find(`option[value='${value}']`).length) {
+                const newOption = new Option(text || value, value, true, true);
+                $(selectEl).append(newOption).trigger('change');
+            } else {
+                $(selectEl).val(String(value)).trigger('change');
+            }
+        } else {
+            selectEl.value = String(value);
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    /* ============================
+        Core label/field logic
+    ============================ */
+    function toggleTransferFields() {
+        const val = (txType?.value || "").toLowerCase();
+        const isTransfer = val.includes('transfer');
+        const isDebit  = val === 'transfer_debit';
+        const isCredit = val === 'transfer_credit';
+
+        // Hide all by default
+        [feeRow, toAmountRow].forEach(r => r && (r.style.display = 'none'));
+        if (toAccountRow) toAccountRow.style.display = isTransfer ? '' : 'none';
+
+        // Reset labels
+        if (accountLabel) accountLabel.textContent = "Account:";
+        if (amountLabel) amountLabel.textContent  = "Amount:";
+
+        if (!isTransfer) return;
+
+        // Mirror labels for debit/credit
+        if (isDebit) {
+            accountLabel.textContent  = "From account:";
+            toAccountLabel.textContent = "To account:";
+        } else if (isCredit) {
+            accountLabel.textContent  = "To account:";
+            toAccountLabel.textContent = "From account:";
+        }
+
+        checkCurrencyDifference();
+    }
+
+    function checkCurrencyDifference() {
+        const val = (txType?.value || "").toLowerCase();
+        const isTransfer = val.includes('transfer');
+        const isDebit  = val === 'transfer_debit';
+        const isCredit = val === 'transfer_credit';
+        if (!isTransfer) return;
+
+        if (fromCurrency && toCurrency && fromCurrency !== toCurrency) {
+            if (feeRow) feeRow.style.display = '';
+            if (toAmountRow) toAmountRow.style.display = '';
+            if (isDebit) {
+                if (amountLabel) amountLabel.textContent = `Sent Amount (excl. fees)(${fromCurrency})`;
+                if (feeLabel) feeLabel.textContent = `Fee Amount (${fromCurrency}):`;
+                if (toAmountLabel) toAmountLabel.textContent = `Received Amount (${toCurrency}):`;
+            } else if (isCredit) {
+                if (amountLabel) amountLabel.textContent = `Received Amount (${fromCurrency})`;
+                if (feeLabel) feeLabel.textContent = `Fee Amount (${toCurrency}):`;
+                if (toAmountLabel) toAmountLabel.textContent = `Sent Amount (excl. fees)(${toCurrency}):`;
+            }
+        } else {
+            if (feeRow) feeRow.style.display = 'none';
+            if (toAmountRow) toAmountRow.style.display = 'none';
+        }
+    }
+
+    /* ============================
+        Event bindings
+    ============================ */
+    function bindSelectEvents(el, onChange) {
+        if (!el) return;
+        el.addEventListener('change', e => onChange(e.target.value));
+        if ($) $(el).on('select2:select', e => onChange(e.params.data?.id || el.value));
+    }
+
+    // Bind account events
+    bindSelectEvents(accountSel, id => {
+        fetchCurrency(id, code => { fromCurrency = code; checkCurrencyDifference(); });
+    });
+    bindSelectEvents(toAccountSel, id => {
+        fetchCurrency(id, code => { toCurrency = code; checkCurrencyDifference(); });
+    });
+
+    // Bind store/category autofill
+    bindSelectEvents(storeSel, id => {
+        fetchJSON(`/admin/transaction/transaction/ajax/get-category/?store_id=${id}`, data => {
+            if (data.category_id) setSelectValue(categorySel, data.category_id, data.category_name);
+        });
+    });
+
+    // Bind account→currency autofill
+    bindSelectEvents(accountSel, id => {
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency/?account_id=${id}`, data => {
+            if (data.currency_id) setSelectValue(currencySel, data.currency_id, data.currency_name);
+        });
+    });
+
+    // Transaction type change
+    txType?.addEventListener('change', toggleTransferFields);
+
+    /* ============================
+        Initial load setup
+    ============================ */
+    const initialAccountId  = accountSel?.value;
+    const initialToAccountId = toAccountSel?.value;
+    if (initialAccountId)
+        fetchCurrency(initialAccountId, code => { fromCurrency = code; checkCurrencyDifference(); });
+    if (initialToAccountId)
+        fetchCurrency(initialToAccountId, code => { toCurrency = code; checkCurrencyDifference(); });
+
+    toggleTransferFields();
+});
+</script>
+{% endblock %}

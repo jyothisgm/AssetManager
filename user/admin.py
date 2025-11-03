@@ -3,6 +3,12 @@ from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import Attachment, User, Role
 from common.logging_config import logger
+from django.contrib import messages
+from django.utils.translation import gettext_lazy as _
+from django.contrib.admin.sites import site
+from django.utils.safestring import mark_safe
+
+
 
 admin.site.site_header = "Asset Manager Admin"
 admin.site.site_title = "Asset Manager Portal"
@@ -197,3 +203,16 @@ class AttachmentAdmin(RestrictedAdmin):
             "fields": ("created_at", "modified_at"),
         }),
     )
+
+_original_index = site.index
+
+def custom_index(request, extra_context=None):
+    if request.user.is_authenticated and not getattr(request.user, "gemini_key", None):
+        message_html = mark_safe(
+            f'Your Gemini API key is not set. '
+            f'<a href="/admin/user/user/{request.user.id}/change/">Set it here</a>.'
+        )
+        messages.warning(request, message_html)
+    return _original_index(request, extra_context)
+
+site.index = custom_index

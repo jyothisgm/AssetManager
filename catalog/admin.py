@@ -305,13 +305,13 @@ class ExchangeRateRecordAdmin(RestrictedAdmin):
         "quote_currency__code",
         "provider__name",
     )
-    list_filter = (
-        ("provider", RelatedOnlyDropdownFilter),
-        ("base_currency", RelatedOnlyDropdownFilter),
-        ("quote_currency", RelatedOnlyDropdownFilter),
-    )
     ordering = ("-date",)
     autocomplete_fields = ("base_currency", "quote_currency", "provider")
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # existing record → make all fields readonly
+            return [field.name for field in self.model._meta.fields]
+        return super().get_readonly_fields(request, obj)
 
     def currency_exchange_display(self, obj):
         """Show exchange pair like USD → EUR."""
