@@ -133,9 +133,6 @@ poetry.toml
 # Django
 *.log
 local_settings.py
-/media/
-staticfiles/
-static/
 *.db
 *.db-journal
 *.sqlite
@@ -182,7 +179,6 @@ __pypackages__/
 # Media & Static Uploads
 /media/
 staticfiles/
-*.jpeg
 deploy.zip
 
 # Logs
