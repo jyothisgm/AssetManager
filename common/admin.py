@@ -90,10 +90,8 @@ class CurrencyAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         func_name = f"{self.__class__.__name__}.get_queryset"
         try:
-            logger.debug(f"[{func_name}] Fetching queryset for CurrencyAdmin")
             qs = super().get_queryset(request)
             qs = qs.select_related(None)  # keep it lightweight
-            logger.debug(f"[{func_name}] Retrieved {qs.count()} currency records")
             return qs
         except Exception as e:
             logger.exception(f"[{func_name}] Error retrieving currency queryset")

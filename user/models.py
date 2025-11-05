@@ -56,7 +56,7 @@ class User(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
     roles = models.ManyToManyField(Role, blank=True)
-    gemini_key = models.CharField(max_length=256)
+    gemini_key = models.CharField(max_length=256, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
 
@@ -78,7 +78,6 @@ class User(AbstractUser):
                     "permissions__codename"
                 )
                 perms |= {f"{app}.{code}" for app, code in role_perms}
-                logger.debug(f"[{func_name}] Combined role-based permissions for {self.email}")
             return perms
         except Exception as e:
             logger.exception(f"[{func_name}] Error retrieving permissions for {self.email}")
@@ -91,7 +90,6 @@ class User(AbstractUser):
                 return True
             codename = perm.split(".")[-1]
             if self.roles.filter(permissions__codename=codename).exists():
-                logger.debug(f"[{func_name}] Role-based permission granted: {perm}")
                 return True
             return super().has_perm(perm, obj)
         except Exception as e:
