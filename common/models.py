@@ -1,39 +1,47 @@
 from django.db import models
 from common.logging_config import logger
 
+class SoftDeleteMixin:
+    """
+    Mixin that provides shared undelete-on-create logic
+    for both QuerySet.create() and Model.save().
+    """
+
+    @classmethod
+    def _undelete_or_create(cls, **kwargs):
+        func_name = f"{cls.__name__}._undelete_or_create"
+        model = cls
+        unique_fields = [
+            f.name for f in model._meta.fields if f.unique and f.name != "id"
+        ]
+        filters = {f: kwargs.get(f) for f in unique_fields if f in kwargs}
+
+        logger.debug(f"[{func_name}] kwargs={kwargs}, unique_fields={unique_fields}, filters={filters}")
+
+        if filters:
+            existing = model.all_objects.filter(**filters).first()
+            if existing and existing.is_deleted:
+                logger.info(f"[{func_name}] Restoring soft-deleted object: {existing}")
+                existing.is_deleted = False
+                for key, value in kwargs.items():
+                    setattr(existing, key, value)
+                existing.save()
+                logger.debug(f"[{func_name}] Object restored and saved successfully: {existing}")
+                return existing
+        return None
+
 
 class SoftDeleteQuerySet(models.QuerySet):
     def create(self, **kwargs):
-        """
-        If an object with same unique constraints exists and is soft-deleted,
-        un-delete it instead of creating a duplicate.
-        """
         func_name = f"{self.__class__.__name__}.create"
         try:
-            model = self.model
-            unique_fields = [
-                f.name for f in model._meta.fields if f.unique and f.name != "id"
-            ]
-            filters = {f: kwargs[f] for f in unique_fields if f in kwargs}
-
-            logger.debug(f"[{func_name}] kwargs={kwargs}, unique_fields={unique_fields}, filters={filters}")
-
-            if filters:
-                existing = model.all_objects.filter(**filters).first()
-                if existing and existing.is_deleted:
-                    logger.info(f"[{func_name}] Restoring soft-deleted object: {existing}")
-                    existing.is_deleted = False
-                    for key, value in kwargs.items():
-                        setattr(existing, key, value)
-                    existing.save()
-                    logger.debug(f"[{func_name}] Object restored and saved successfully: {existing}")
-                    return existing
-
-            logger.debug(f"[{func_name}] Creating new instance for model {model.__name__}")
+            existing = self.model._undelete_or_create(**kwargs)
+            if existing:
+                return existing
+            logger.debug(f"[{func_name}] Creating new instance for model {self.model.__name__}")
             instance = super().create(**kwargs)
             logger.info(f"[{func_name}] Created new instance: {instance}")
             return instance
-
         except Exception as e:
             logger.exception(f"[{func_name}] Error during create operation")
             raise e
@@ -43,16 +51,14 @@ class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
     def get_queryset(self):
         func_name = f"{self.__class__.__name__}.get_queryset"
         try:
-            qs = super().get_queryset().filter(is_deleted=False)
-            logger.debug(f"[{func_name}] Returning queryset filtered for non-deleted items")
-            return qs
+            return super().get_queryset().filter(is_deleted=False)
         except Exception as e:
             logger.exception(f"[{func_name}] Failed to build queryset")
             raise e
 
 
 # ---------- Base ----------
-class TimeStampedModel(models.Model):
+class TimeStampedModel(models.Model, SoftDeleteMixin):
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
     is_deleted = models.BooleanField(default=False)
@@ -73,6 +79,20 @@ class TimeStampedModel(models.Model):
             logger.debug(f"[{func_name}] Marked as deleted successfully")
         except Exception as e:
             logger.exception(f"[{func_name}] Error during soft delete")
+            raise e
+
+    def save(self, *args, **kwargs):
+        func_name = f"{self.__class__.__name__}.save"
+        try:
+            if not self.pk:  # new object
+                # Reuse the same logic as QuerySet.create
+                existing = self.__class__._undelete_or_create(**self.__dict__)
+                if existing:
+                    self.pk = existing.pk  # link to restored one
+                    return  # avoid duplicate insert
+            super().save(*args, **kwargs)
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error during save operation")
             raise e
 
     def hard_delete(self, *args, **kwargs):

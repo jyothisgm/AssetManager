@@ -279,8 +279,8 @@ class InstitutionAdmin(RestrictedViewAdmin):
         "website",
     )
     list_filter = ("type", "country")
+    readonly_fields = ("name", "type", "website", "preferred", "logo")
     ordering = ("name",)
-    autocomplete_fields = ("preferred",)
 
     def preferred_display(self, obj):
         return obj.preferred.name if obj.preferred else "-"

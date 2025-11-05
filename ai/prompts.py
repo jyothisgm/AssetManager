@@ -14,8 +14,8 @@ Return a JSON list of objects, one per institution name, using this format:
 ]
 Ignore cash as an institution.
 Make sure the logo URLs point directly to image files. Usually you are returning invalid logo URLs.
-Institution names to classify: {institutions}
-Try to pick if exist from: {existing_institutions}
+Institution names to classify: [{institutions}]
+Try to pick if exist from: [{existing_institutions}]
 """
 
 TRANSACTION_ATTACHMENT_TYPES = [
@@ -66,7 +66,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
-- date, if no year given, use current year.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
@@ -100,8 +100,11 @@ Return JSON in this exact structure:
     }}
 ]
 Notes:
-- Extract tax, subtotal, or service items if available.
-- Normalize vendor and product names using preferred lists.
+- Normalize store & product names to their most common English equivalents.
+- Use the `preferred_items_list` for reference of normalized items + units.
+- Each item should have price and quantity; quantity defaults to 1.
+- Ensure total matches sum of item prices; if not, fix it.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
@@ -133,8 +136,11 @@ Return JSON in this exact structure:
     ]
 }}
 Notes:
-- Focus on extracting items purchased and the total amount.
-- If subtotal and tax exist, ensure their sum matches total.
+- Normalize store & product names to their most common English equivalents.
+- Use the `preferred_items_list` for reference of normalized items + units.
+- Each item should have price and quantity; quantity defaults to 1.
+- Ensure total matches sum of item prices; if not, fix it.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
@@ -154,8 +160,11 @@ Return JSON in this exact structure:
     "currency": "ISO code like 'USD', 'EUR', 'INR'"
 }}
 Notes:
-- Extract sender, merchant, and transaction info if available.
-- Handle both debit and credit alerts accurately.
+- Normalize store & product names to their most common English equivalents.
+- Use the `preferred_items_list` for reference of normalized items + units.
+- Each item should have price and quantity; quantity defaults to 1.
+- Ensure total matches sum of item prices; if not, fix it.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
@@ -177,9 +186,11 @@ Return JSON in this exact structure:
     }}
 ]
 Notes:
-- Each line represents one transaction.
-- Normalize payee or merchant names.
-- Ensure total debits and credits balance correctly.
+- Normalize store & product names to their most common English equivalents.
+- Use the `preferred_items_list` for reference of normalized items + units.
+- Each item should have price and quantity; quantity defaults to 1.
+- Ensure total matches sum of item prices; if not, fix it.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
@@ -201,8 +212,11 @@ Return JSON in this exact structure:
     }}
 ]
 Notes:
-- Identify payer, payee, and payment reference if available.
-- Works for single or batched payments.
+- Normalize store & product names to their most common English equivalents.
+- Use the `preferred_items_list` for reference of normalized items + units.
+- Each item should have price and quantity; quantity defaults to 1.
+- Ensure total matches sum of item prices; if not, fix it.
+- date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
 
