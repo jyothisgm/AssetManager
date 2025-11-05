@@ -86,7 +86,7 @@ Return JSON in this exact structure:
         "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
         "currency": "ISO code like 'USD', 'EUR', 'INR'",
         "items": [
-            {
+            {{
                 "name_raw": "string",
                 "name_normalized": "string maybe in [{preferred_items_list}]",
                 "brand_raw": "string or null",
