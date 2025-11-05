@@ -13,20 +13,16 @@ class CurrentUserMiddleware:
     def __call__(self, request):
         func_name = "CurrentUserMiddleware.__call__"
         user = getattr(request, "user", None)
-
         try:
             # Store user for this thread (shared with logger)
             set_current_user(user)
             logger.debug(f"[{func_name}] Stored user in thread-local: {user}")
-
             response = self.get_response(request)
             logger.debug(f"[{func_name}] Response generated successfully")
             return response
-
         except Exception as e:
             logger.exception(f"[{func_name}] Error while processing request")
             raise e
-
         finally:
             # Always clear to prevent leakage across requests
             set_current_user(None)

@@ -37,8 +37,10 @@ idna==3.11
 imagesize==1.4.1
 isodate==0.7.2
 jwcrypto==1.5.6
+logtail-python==0.3.4
 Markdown==3.9
 modelscope==1.31.0
+msgpack==1.1.2
 mssql-django==1.6
 networkx==3.5
 numpy==2.3.4
