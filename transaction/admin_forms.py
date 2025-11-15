@@ -191,7 +191,7 @@ class TransactionForm(forms.ModelForm):
         decimal_places=2,
         max_digits=12,
         label="Fee amount",
-        help_text="Transfer fee in source currency (optional)."
+        help_text="Transaction fee (optional). A separate fee transaction will be created automatically."
     )
     to_amount = forms.DecimalField(
         required=False,
@@ -217,6 +217,11 @@ class TransactionForm(forms.ModelForm):
             self.fields["to_account"].queryset = Account.objects.none()
 
         instance = kwargs.get("instance")
+        
+        # Prefill "fee_amount" for any transaction with a fee
+        if instance and instance.fee and not self.initial.get("fee_amount"):
+            self.fields["fee_amount"].initial = instance.fee.amount
+        
         if instance and instance.linked_transaction_id:
             linked = instance.linked_transaction
 
@@ -228,8 +233,6 @@ class TransactionForm(forms.ModelForm):
             if linked.amount:
                 self.fields["to_amount"].initial = linked.amount
 
-            # Prefill "fee_amount"
-            if instance.fee and not self.initial.get("fee_amount"):
-                self.fields["fee_amount"].initial = instance.fee.amount
-            elif linked.fee and not self.initial.get("fee_amount"):
+            # Prefill "fee_amount" from linked transaction if not already set
+            if linked.fee and not self.initial.get("fee_amount") and not instance.fee:
                 self.fields["fee_amount"].initial = linked.fee.amount

@@ -48,6 +48,7 @@ Return JSON in this exact structure:
     "category": "one of [{categories_list}]",
     "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
     "currency": "ISO code like 'USD', 'EUR', 'INR'",
+    "fee": number or null,
     "items": [
         {{
             "name_raw": "string",
@@ -66,6 +67,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
@@ -85,6 +87,7 @@ Return JSON in this exact structure:
         "category": "one of [{categories_list}]",
         "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
         "currency": "ISO code like 'USD', 'EUR', 'INR'",
+        "fee": number or null,
         "items": [
             {{
                 "name_raw": "string",
@@ -104,6 +107,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
@@ -122,6 +126,7 @@ Return JSON in this exact structure:
     "category": "one of [{categories_list}]",
     "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
     "currency": "ISO code like 'USD', 'EUR', 'INR'",
+    "fee": number or null,
     "items": [
         {{
             "name_raw": "string",
@@ -140,6 +145,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
@@ -157,13 +163,15 @@ Return JSON in this exact structure:
     "amount": number,
     "category": "one of [{categories_list}]",
     "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
-    "currency": "ISO code like 'USD', 'EUR', 'INR'"
+    "currency": "ISO code like 'USD', 'EUR', 'INR'",
+    "fee": number or null
 }}
 Notes:
 - Normalize store & product names to their most common English equivalents.
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
@@ -182,7 +190,8 @@ Return JSON in this exact structure:
         "amount": number,
         "category": "one of [{categories_list}]",
         "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
-        "currency": "ISO code like 'USD', 'EUR', 'INR'"
+        "currency": "ISO code like 'USD', 'EUR', 'INR'",
+        "fee": number or null
     }}
 ]
 Notes:
@@ -190,6 +199,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """
@@ -208,7 +218,8 @@ Return JSON in this exact structure:
         "amount": number,
         "category": "one of [{categories_list}]",
         "transaction_type": "string" in [debit, credit, transfer_credit, transfer_debit],
-        "currency": "ISO code like 'USD', 'EUR', 'INR'"
+        "currency": "ISO code like 'USD', 'EUR', 'INR'",
+        "fee": number or null
     }}
 ]
 Notes:
@@ -216,6 +227,7 @@ Notes:
 - Use the `preferred_items_list` for reference of normalized items + units.
 - Each item should have price and quantity; quantity defaults to 1.
 - Ensure total matches sum of item prices; if not, fix it.
+- Extract "fee" if there is a separate fee, transfer fee, conversion fee, service charge, processing fee, or transaction fee mentioned. Set to null if no fee is present.
 - date, if no year given, use current year, if there is doubt in the format choose the date closest to the date of request.
 - If the year cannot be identified, use the year {current_year}.
 """

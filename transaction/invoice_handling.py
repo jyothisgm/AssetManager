@@ -196,6 +196,16 @@ def process_transaction_file(transaction_file):
                             }
                         )
 
+                    # Extract fee if present
+                    fee_amount = None
+                    if tx_data.get("fee") is not None:
+                        try:
+                            fee_amount = float(tx_data.get("fee", 0))
+                            if fee_amount <= 0:
+                                fee_amount = None
+                        except (ValueError, TypeError):
+                            fee_amount = None
+
                     parsed_transactions.append(
                         {
                             "store": store_ref,
@@ -204,6 +214,7 @@ def process_transaction_file(transaction_file):
                             "currency": currency_ref,
                             "amount": amount,
                             "items": parsed_items,
+                            "fee": fee_amount,
                         }
                     )
 

@@ -74,15 +74,21 @@ document.addEventListener('DOMContentLoaded', function () {
         const isDebit  = val === 'transfer_debit';
         const isCredit = val === 'transfer_credit';
 
-        // Hide all by default
-        [feeRow, toAmountRow].forEach(r => r && (r.style.display = 'none'));
+        // Always show fee field, hide to_amount and to_account for non-transfers
+        if (feeRow) feeRow.style.display = '';
         if (toAccountRow) toAccountRow.style.display = isTransfer ? '' : 'none';
+        // toAmountRow visibility will be controlled by checkCurrencyDifference() for transfers
+        if (!isTransfer && toAmountRow) toAmountRow.style.display = 'none';
 
         // Reset labels
         if (accountLabel) accountLabel.textContent = "Account:";
         if (amountLabel) amountLabel.textContent  = "Amount:";
+        if (feeLabel) feeLabel.textContent = "Fee amount:";
 
-        if (!isTransfer) return;
+        if (!isTransfer) {
+            // For non-transfers, fee is always visible with simple label
+            return;
+        }
 
         // Mirror labels for debit/credit
         if (isDebit) {
@@ -101,23 +107,36 @@ document.addEventListener('DOMContentLoaded', function () {
         const isTransfer = val.includes('transfer');
         const isDebit  = val === 'transfer_debit';
         const isCredit = val === 'transfer_credit';
-        if (!isTransfer) return;
+        
+        // Fee field is always visible, but update labels for transfers
+        if (!isTransfer) {
+            if (feeLabel) feeLabel.textContent = "Fee amount:";
+            return;
+        }
 
         if (fromCurrency && toCurrency && fromCurrency !== toCurrency) {
-            if (feeRow) feeRow.style.display = '';
+            // Cross-currency transfer - show to_amount field with currency-specific labels
             if (toAmountRow) toAmountRow.style.display = '';
             if (isDebit) {
-                if (amountLabel) amountLabel.textContent = `Sent Amount (excl. fees)(${fromCurrency})`;
-                if (feeLabel) feeLabel.textContent = `Fee Amount (${fromCurrency}):`;
-                if (toAmountLabel) toAmountLabel.textContent = `Received Amount (${toCurrency}):`;
+                if (amountLabel) amountLabel.textContent = fromCurrency ? `Sent Amount (excl. fees)(${fromCurrency})` : 'Sent Amount (excl. fees)';
+                if (feeLabel) feeLabel.textContent = fromCurrency ? `Fee Amount (${fromCurrency}):` : 'Fee Amount:';
+                if (toAmountLabel) toAmountLabel.textContent = toCurrency ? `Received Amount (${toCurrency}):` : 'Received Amount:';
             } else if (isCredit) {
-                if (amountLabel) amountLabel.textContent = `Received Amount (${fromCurrency})`;
-                if (feeLabel) feeLabel.textContent = `Fee Amount (${toCurrency}):`;
-                if (toAmountLabel) toAmountLabel.textContent = `Sent Amount (excl. fees)(${toCurrency}):`;
+                if (amountLabel) amountLabel.textContent = fromCurrency ? `Received Amount (${fromCurrency})` : 'Received Amount';
+                if (feeLabel) feeLabel.textContent = toCurrency ? `Fee Amount (${toCurrency}):` : 'Fee Amount:';
+                if (toAmountLabel) toAmountLabel.textContent = toCurrency ? `Sent Amount (excl. fees)(${toCurrency}):` : 'Sent Amount (excl. fees):';
             }
         } else {
-            if (feeRow) feeRow.style.display = 'none';
+            // Same currency transfer - hide to_amount field and use simple labels
             if (toAmountRow) toAmountRow.style.display = 'none';
+            const currency = fromCurrency || toCurrency;
+            if (isDebit) {
+                if (amountLabel) amountLabel.textContent = currency ? `Amount (${currency}):` : 'Amount:';
+                if (feeLabel) feeLabel.textContent = currency ? `Fee Amount (${currency}):` : 'Fee Amount:';
+            } else if (isCredit) {
+                if (amountLabel) amountLabel.textContent = currency ? `Amount (${currency}):` : 'Amount:';
+                if (feeLabel) feeLabel.textContent = currency ? `Fee Amount (${currency}):` : 'Fee Amount:';
+            }
         }
     }
 

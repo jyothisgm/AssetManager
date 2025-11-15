@@ -44,6 +44,87 @@ def _D(val):
     except Exception:
         return Decimal("0")
 
+
+def create_fee_transaction(parent_transaction, fee_amount, user, currency=None, store=None):
+    """
+    Creates a fee transaction linked to a parent transaction.
+    
+    Args:
+        parent_transaction: The Transaction object that the fee is associated with
+        fee_amount: The fee amount (Decimal or float)
+        user: The user who created the parent transaction
+        currency: Optional Currency object (defaults to parent's currency)
+        store: Optional Store object for the fee (defaults to "Conversion Fees" or "Bank Fee")
+    
+    Returns:
+        Transaction: The created fee transaction, or None if fee_amount is invalid
+    """
+    func_name = "create_fee_transaction"
+    try:
+        if not fee_amount or fee_amount <= 0:
+            return None
+        
+        fee_amount = Decimal(str(fee_amount))
+        currency = currency or parent_transaction.currency
+        
+        # Get or create Bank Fee category
+        bank_fee_category = PurchaseCategory.objects.filter(name__iexact="Bank Fee").first()
+        if not bank_fee_category:
+            bank_fee_category, _ = PurchaseCategory.objects.get_or_create(
+                name="Bank Fee",
+                defaults={"created_by": user}
+            )
+        
+        # Get or create Conversion Fees store
+        if not store:
+            conversion_store = Store.objects.filter(name__iexact="Conversion Fees").first()
+            if not conversion_store:
+                conversion_store, _ = Store.objects.get_or_create(
+                    name="Conversion Fees",
+                    defaults={"created_by": user, "category": bank_fee_category}
+                )
+            store = conversion_store
+        
+        # Check if fee transaction already exists
+        existing_fee = parent_transaction.fee
+        if existing_fee:
+            # Update existing fee transaction
+            existing_fee.amount = fee_amount
+            existing_fee.currency = currency
+            existing_fee.category = bank_fee_category
+            existing_fee.store = store
+            existing_fee.date = parent_transaction.date
+            existing_fee.account = parent_transaction.account
+            existing_fee.description = f"Fee for transaction {parent_transaction.id}"
+            existing_fee.save()
+            logger.info(f"[{func_name}] Updated fee transaction {existing_fee.id} for {parent_transaction.id}")
+            return existing_fee
+        
+        # Create new fee transaction
+        fee_tx = Transaction.objects.create(
+            created_by=user,
+            account=parent_transaction.account,
+            transaction_type="debit",
+            amount=fee_amount,
+            date=parent_transaction.date,
+            currency=currency,
+            category=bank_fee_category,
+            store=store,
+            description=f"Fee for transaction {parent_transaction.id}",
+            notes="auto-imported fee",
+        )
+        
+        # Link fee to parent transaction
+        parent_transaction.fee = fee_tx
+        parent_transaction.save(update_fields=["fee"])
+        
+        logger.info(f"[{func_name}] Created fee transaction {fee_tx.id} (amount={fee_amount}) for {parent_transaction.id}")
+        return fee_tx
+        
+    except Exception as e:
+        logger.warning(f"[{func_name}] Error creating fee transaction: {e}", exc_info=True)
+        return None
+
 class ProductCategoryDropdownFilter(admin.SimpleListFilter):
     title = "Product Category"
     parameter_name = "product_category"
@@ -210,9 +291,27 @@ class TransactionAdmin(RestrictedAdmin):
         to_account = form.cleaned_data.get("to_account")
         fee_amount = form.cleaned_data.get("fee_amount")
         to_amount = form.cleaned_data.get("to_amount")
-        print(to_amount, obj.amount)
+        
+        # Handle transfer-specific logic (includes fee handling for transfers)
         if obj.transaction_type and "transfer" in obj.transaction_type and to_account:
             self.handle_transfer_transaction(request, obj, to_account, fee_amount, to_amount)
+        else:
+            # Handle fee for non-transfer transactions
+            if fee_amount and fee_amount > 0:
+                create_fee_transaction(
+                    parent_transaction=obj,
+                    fee_amount=fee_amount,
+                    user=request.user,
+                    currency=obj.currency,
+                    store=obj.store,
+                )
+            elif obj.fee:
+                # Remove fee transaction if fee_amount is cleared
+                fee_tx = obj.fee
+                obj.fee = None
+                obj.save(update_fields=["fee"])
+                fee_tx.delete()
+                logger.info(f"[TransactionAdmin.save_model] Removed fee transaction {fee_tx.id} for {obj.id}")
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
@@ -370,6 +469,17 @@ class TransactionAdmin(RestrictedAdmin):
                     transaction.date = date_val
                     transaction.processed = True
                     transaction.save()
+                    
+                    # Create fee transaction if fee is present
+                    fee_amount = tx_data.get("fee")
+                    if fee_amount:
+                        create_fee_transaction(
+                            parent_transaction=transaction,
+                            fee_amount=fee_amount,
+                            user=request.user,
+                            currency=currency_ref,
+                            store=store_ref,
+                        )
 
                     # Attach file only once
                     if idx == 0:
@@ -592,15 +702,31 @@ class TransactionAdmin(RestrictedAdmin):
             cross_currency = bool(from_currency and to_currency and from_currency != to_currency)
 
             # -------------------------------
-            # Fee (only if cross-currency)
+            # Fee (for all transfers, not just cross-currency)
             # -------------------------------
             fee_tx = getattr(obj, "fee", None)
             fee_amount = _D(fee_amount)
 
-            if cross_currency and fee_amount > 0:
+            if fee_amount > 0:
                 fee_percent = (float(fee_amount) / float(from_amount)) * 100 if from_amount else 0.0
                 bank_fee_category = PurchaseCategory.objects.filter(name__iexact="Bank Fee").first()
-                conversion_store  = Store.objects.filter(name__iexact="Conversion Fees").first()
+                if not bank_fee_category:
+                    bank_fee_category, _ = PurchaseCategory.objects.get_or_create(
+                        name="Bank Fee",
+                        defaults={"created_by": request.user}
+                    )
+                
+                # Use Conversion Fees store for cross-currency, otherwise use transaction store
+                if cross_currency:
+                    conversion_store = Store.objects.filter(name__iexact="Conversion Fees").first()
+                    if not conversion_store:
+                        conversion_store, _ = Store.objects.get_or_create(
+                            name="Conversion Fees",
+                            defaults={"created_by": request.user, "category": bank_fee_category}
+                        )
+                    fee_store = conversion_store
+                else:
+                    fee_store = obj.store or Store.objects.filter(name__iexact="Bank Fee").first()
 
                 if not fee_tx:
                     fee_tx = Transaction.objects.create(
@@ -611,7 +737,7 @@ class TransactionAdmin(RestrictedAdmin):
                         date=obj.date,
                         currency=from_currency,
                         category=bank_fee_category,
-                        store=conversion_store,
+                        store=fee_store,
                         description=f"Transfer fee for {obj.id}",
                     )
                     logger.info(f"[{func_name}] Created fee transaction {fee_tx.id} for {obj.id}")
@@ -620,13 +746,19 @@ class TransactionAdmin(RestrictedAdmin):
                     fee_tx.amount = fee_amount
                     fee_tx.currency = from_currency
                     fee_tx.category = bank_fee_category
-                    fee_tx.store = conversion_store
+                    fee_tx.store = fee_store
                     fee_tx.date = obj.date
                     fee_tx.description = f"Transfer fee for {obj.id}"
                     fee_tx.save()
             else:
                 fee_percent = 0.0
-                fee_tx = None  # explicitly none for same-currency
+                # Remove existing fee transaction if fee_amount is cleared
+                if fee_tx:
+                    obj.fee = None
+                    obj.save(update_fields=["fee"])
+                    fee_tx.delete()
+                    logger.info(f"[{func_name}] Removed fee transaction {fee_tx.id} for {obj.id}")
+                fee_tx = None
 
             # -------------------------------
             # Exchange rate (only if cross-currency)
