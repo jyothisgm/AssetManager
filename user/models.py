@@ -102,7 +102,6 @@ class User(AbstractUser):
             if self.is_superuser:
                 return True
             if self.roles.filter(permissions__content_type__app_label=app_label).exists():
-                logger.debug(f"[{func_name}] Role-based module permission granted for {app_label}")
                 return True
             return super().has_module_perms(app_label)
         except Exception as e:
@@ -169,9 +168,14 @@ class BaseUserModel(TimeStampedModel):
     def save(self, *args, **kwargs):
         func_name = f"{self.__class__.__name__}.save"
         try:
-            if not self.pk and not self.created_by:
+            created_by = kwargs.pop("created_by", None)
+            if not self.pk and not self.created_by and created_by:
+                self.created_by = created_by
+                logger.debug(f"[{func_name}] Explicitly set created_by={created_by.email}")
+
+            elif not self.pk and not self.created_by:
                 user = get_current_user()
-                if user and user.is_authenticated:
+                if user and getattr(user, "is_authenticated", False):
                     self.created_by = user
                     logger.debug(f"[{func_name}] Auto-set created_by={user.email}")
             super().save(*args, **kwargs)
@@ -307,3 +311,46 @@ class Attachment(BaseUserModel):
 
         # Join all parts with " – "
         return " – ".join(parts) or f"{self.type.capitalize()} ({self.id})"
+
+
+class GmailAccount(BaseUserModel):
+    email_address = models.EmailField()
+    creds = models.JSONField()  # stores token, refresh_token, client_id, etc.
+    last_history_id = models.CharField(max_length=100, null=True, blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ("created_by", "email_address")
+
+    def __str__(self):
+        return f"{self.email_address}"
+
+
+class EmailSyncJob(BaseUserModel):
+    STATUS_CHOICES = [
+        ("queued", "Queued"),
+        ("fetching", "Fetching"),
+        ("analysing", "Analysing"),
+        ("parsing", "Parsing"),
+        ("done", "Done"),
+        ("paused", "Paused"),
+        ("failed", "Failed"),
+    ]
+    gmail_account = models.ForeignKey("user.GmailAccount", on_delete=models.CASCADE, related_name="sync_jobs")
+    total_emails = models.IntegerField(default=0)              # total emails available
+    analysed_count = models.IntegerField(default=0)            # how many emails analysed (LLM checked)
+    potential_tx_count = models.IntegerField(default=0)        # how many emails flagged as potential tx
+    parsed_count = models.IntegerField(default=0)              # how many potential tx emails parsed
+    successful_tx_count = models.IntegerField(default=0)       # how many transactions successfully parsed
+
+    last_email_timestamp = models.DateTimeField(null=True, blank=True)
+    last_tx_timestamp = models.DateTimeField(null=True, blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
+    next_page_token = models.CharField(max_length=200, null=True, blank=True)
+    partial_results = models.JSONField(null=True, blank=True)
+
+
+    def __str__(self):
+        return f"EmailSyncJob(created_by={self.created_by_id}, gmail={self.gmail_account.email_address}, status={self.status})"

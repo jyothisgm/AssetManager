@@ -2,18 +2,15 @@
 import mimetypes
 import os
 import uuid
-import logging
 from datetime import datetime
 
 from django.db import models
-from django.utils import timezone
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 
 from user.models import BaseUserModel, Attachment, get_attachment_type
-
-logger = logging.getLogger(__name__)
+from common.logging_config import logger
 
 
 # -------------------------------------------------------------------

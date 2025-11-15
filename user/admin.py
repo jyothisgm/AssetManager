@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.urls import reverse
-from .models import Attachment, User, Role
+from .models import Attachment, GmailAccount, User, Role
 from common.logging_config import logger
 from django.contrib import messages
 from django.utils.translation import gettext_lazy as _
@@ -12,8 +12,8 @@ from django.utils.html import format_html
 from django.template.response import TemplateResponse
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter
 from django.contrib.admin import SimpleListFilter
+from django.template.loader import get_template
 from django.contrib.contenttypes.models import ContentType
-
 
 
 admin.site.site_header = "Asset Manager Admin"
@@ -182,25 +182,73 @@ class RestrictedAdmin(RestrictedViewAdmin):
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 
+class GmailAccountInline(admin.TabularInline):
+    model = GmailAccount
+    fk_name = "created_by"
+    extra = 0
+    fields = ("email_address", "active", "last_synced_at")
+    readonly_fields = ("email_address", "last_synced_at")
+    can_delete = True
+    verbose_name_plural = "Gmail Accounts"
+
+    class Media:
+        js = ("admin/js/gmail_connect_redirect.js",)
+
+    def has_add_permission(self, request, obj=None):
+        return True
+
+    def has_view_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(created_by=request.user)
+
+
+# -------------------------------------------------------------------
+# Main User admin
+# -------------------------------------------------------------------
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
+    inlines = [GmailAccountInline]
+
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Personal info", {"fields": ("first_name", "last_name")}),
         ("Keys", {"fields": ("gemini_key",)}),
-        ("Roles & Permissions", {"fields": ("roles", "is_active", "is_staff", "is_superuser")}),
+        (
+            "Roles & Permissions",
+            {"fields": ("roles", "is_active", "is_staff", "is_superuser")},
+        ),
     )
     add_fieldsets = ((None, {"fields": ("email", "password1", "password2")}),)
     list_display = ("email", "is_staff", "is_superuser")
     search_fields = ("email",)
     ordering = ("email",)
 
+    # -------------------------------------------------------------------
     def get_readonly_fields(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.get_readonly_fields"
         try:
             if not request.user.is_superuser:
-                logger.debug(f"[{func_name}] Restricting readonly fields for non-superuser {request.user.email}")
-                return ['username', 'is_staff', 'is_superuser', 'user_permissions', 'groups', 'roles', 'email', 'is_active']
+                logger.debug(
+                    f"[{func_name}] Restricting readonly fields for non-superuser {request.user.email}"
+                )
+                return [
+                    "username",
+                    "is_staff",
+                    "is_superuser",
+                    "user_permissions",
+                    "groups",
+                    "roles",
+                    "email",
+                    "is_active",
+                ]
             return super().get_readonly_fields(request, obj)
         except Exception as e:
             logger.exception(f"[{func_name}] Error getting readonly fields")
@@ -211,27 +259,34 @@ class UserAdmin(BaseUserAdmin):
         try:
             qs = super().get_queryset(request)
             if request.user.is_superuser:
-                logger.debug(f"[{func_name}] Superuser {request.user.email} viewing all users")
+                logger.debug(
+                    f"[{func_name}] Superuser {request.user.email} viewing all users"
+                )
                 return qs
             filtered = qs.filter(email=request.user.email, is_deleted=False)
-            logger.debug(f"[{func_name}] Restricted queryset to current user {request.user.email}")
+            logger.debug(
+                f"[{func_name}] Restricted queryset to current user {request.user.email}"
+            )
             return filtered
         except Exception as e:
             logger.exception(f"[{func_name}] Error fetching queryset for {request.user.email}")
             raise e
 
+    # -------------------------------------------------------------------
     def get_fieldsets(self, request, obj=None):
         func_name = f"{self.__class__.__name__}.get_fieldsets"
         try:
             if not request.user.is_superuser:
-                logger.debug(f"[{func_name}] Returning limited fieldsets for {request.user.email}")
-                fieldsets = (
+                logger.debug(
+                    f"[{func_name}] Returning limited fieldsets for {request.user.email}"
+                )
+                # non-superusers still see Gmail inline section automatically
+                return (
                     (None, {"fields": ("email", "password")}),
                     ("Personal info", {"fields": ("first_name", "last_name")}),
                     ("Keys", {"fields": ("gemini_key",)}),
                     ("Roles & Permissions", {"fields": ("roles",)}),
                 )
-                return fieldsets
             return super().get_fieldsets(request, obj)
         except Exception as e:
             logger.exception(f"[{func_name}] Error getting fieldsets")

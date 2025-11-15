@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from common.models import Unit
 from django.db.models import Q
 from common.logging_config import logger
@@ -75,3 +76,13 @@ def convert_quantity(value: float, from_unit, to_unit) -> float:
     except Exception as e:
         logger.exception(f"[{func_name}] Error during conversion value={value}, from={from_unit}, to={to_unit}")
         raise e
+
+
+def safe_decimal(value) -> Decimal:
+    """Convert arbitrary input to Decimal safely."""
+    try:
+        if value in (None, "", "null", "none", "N/A"):
+            return Decimal("0.00")
+        return Decimal(str(value).replace(",", "").strip() or "0").quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return Decimal("0.00")

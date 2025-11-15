@@ -77,6 +77,15 @@ class Transaction(BaseUserModel):
         Account, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
 
+    card = models.ForeignKey(
+        "account.Card",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="The card used for this transaction (if applicable).",
+    )
+
     category = models.ForeignKey(
         PurchaseCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions"
     )
@@ -243,3 +252,58 @@ def update_transaction_total_match_on_save(sender, instance, created, **kwargs):
         logger.exception(
             f"[post_save] Error updating totals_match for Transaction ID={instance.id}: {e}"
         )
+
+
+class EmailTransactionMap(BaseUserModel):
+    """
+    Connects Gmail messages and Transactions (many-to-many via this join table).
+    Handles cases where one transaction appears in multiple emails.
+    """
+
+    transaction = models.ForeignKey(
+        "transaction.Transaction",
+        on_delete=models.CASCADE,
+        related_name="email_mappings",
+        help_text="Linked financial transaction parsed from this email."
+    )
+
+    gmail_account = models.ForeignKey(
+        "user.GmailAccount",
+        on_delete=models.CASCADE,
+        related_name="mapped_transactions",
+        help_text="Gmail account this email belongs to."
+    )
+
+    email_id = models.CharField(
+        max_length=128,
+        db_index=True,
+        help_text="Unique Gmail message ID (from Gmail API)."
+    )
+
+    email_subject = models.CharField(max_length=255, blank=True, null=True)
+    email_from = models.CharField(max_length=255, blank=True, null=True)
+    email_timestamp = models.DateTimeField(blank=True, null=True)
+
+    job = models.ForeignKey(
+        "user.EmailSyncJob",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mapped_transactions",
+        help_text="Email sync job that processed this email."
+    )
+
+    confidence = models.FloatField(default=1.0)
+    needs_review = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("gmail_account", "email_id", "transaction")
+        indexes = [
+            models.Index(fields=["email_id"]),
+            models.Index(fields=["gmail_account", "email_id"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Tx {self.transaction_id} ↔ Email {self.email_id}"
+
