@@ -199,6 +199,20 @@ class TransactionForm(forms.ModelForm):
         max_digits=12,
         label="To amount",
     )
+    transaction_currency_amount = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        label="Transaction amount",
+        help_text="Shows the transaction amount in transaction currency. This is calculated from the account amount and exchange rate."
+    )
+    exchange_rate = forms.DecimalField(
+        required=False,
+        decimal_places=8,
+        max_digits=20,
+        label="Exchange rate (optional)",
+        help_text="Manual exchange rate (X account_currency = transaction_currency). If not provided, will be calculated from amounts or fetched from market."
+    )
 
     class Meta:
         model = Transaction
@@ -206,6 +220,7 @@ class TransactionForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         # Capture the request (admin passes it through `get_form` or formfield_for_* methods)
+        instance = kwargs.get("instance")
         super().__init__(*args, **kwargs)
         request = getattr(self, 'request', None)
 
@@ -221,6 +236,50 @@ class TransactionForm(forms.ModelForm):
         # Prefill "fee_amount" for any transaction with a fee
         if instance and instance.fee and not self.initial.get("fee_amount"):
             self.fields["fee_amount"].initial = instance.fee.amount
+        
+        # Prefill exchange rate fields for cross-currency transactions
+        if instance and instance.exchange_rate_record:
+            exch = instance.exchange_rate_record
+            # If transaction currency is different from account currency, show the exchange rate
+            account_currency = getattr(instance.account, "currency", None) if instance.account else None
+            if account_currency and instance.currency and account_currency != instance.currency:
+                # Set exchange rate from the exchange rate record first
+                if not self.initial.get("exchange_rate"):
+                    self.fields["exchange_rate"].initial = exch.provider_rate
+                    self.initial["exchange_rate"] = exch.provider_rate
+                
+                # Calculate transaction currency amount from account amount and exchange rate
+                # This calculation happens in Python, not JavaScript
+                if exch.provider_rate and instance.amount:
+                    try:
+                        from decimal import Decimal
+                        # transaction_amount = account_amount / exchange_rate
+                        # exchange_rate is: X account_currency = transaction_currency
+                        # So: transaction_amount = account_amount / X
+                        transaction_amount = Decimal(str(instance.amount)) / Decimal(str(exch.provider_rate))
+                        calculated_value = float(transaction_amount.quantize(Decimal("0.01")))
+                        
+                        # Set the initial value which will be displayed in the form
+                        self.fields["transaction_currency_amount"].initial = calculated_value
+                        # Also set it in self.initial dict to ensure it's pre-filled
+                        self.initial["transaction_currency_amount"] = calculated_value
+                        # Set it as a data attribute on the widget for JavaScript access
+                        if 'data-initial-value' not in self.fields["transaction_currency_amount"].widget.attrs:
+                            self.fields["transaction_currency_amount"].widget.attrs['data-initial-value'] = str(calculated_value)
+                        
+                        logger.debug(
+                            f"[TransactionForm.__init__] Calculated transaction currency amount: "
+                            f"{calculated_value} from account amount {instance.amount} / exchange rate {exch.provider_rate}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"[TransactionForm.__init__] Error calculating transaction currency amount: {e}", exc_info=True)
+                        pass
+                
+                # Make transaction_currency_amount readonly AFTER setting the value
+                # This ensures the value is set before making it readonly
+                self.fields["transaction_currency_amount"].widget.attrs['readonly'] = True
+                self.fields["transaction_currency_amount"].widget.attrs['class'] = 'readonly'
+                self.fields["transaction_currency_amount"].required = False
         
         if instance and instance.linked_transaction_id:
             linked = instance.linked_transaction

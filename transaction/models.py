@@ -54,8 +54,8 @@ class Transaction(BaseUserModel):
     TRANSACTION_TYPES = [
         ("debit", "Debit"),
         ("credit", "Credit"),
-        ("transfer_credit", "Transfer_Credit"),
-        ("transfer_debit", "Transfer_Debit"),
+        ("transfer_credit", "Transfer IN"),
+        ("transfer_debit", "Transfer OUT"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

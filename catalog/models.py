@@ -414,4 +414,4 @@ class ExchangeRateRecord(BaseUserModel):
         base = getattr(self.base_currency, "code", str(self.base_currency))
         quote = getattr(self.quote_currency, "code", str(self.quote_currency))
         provider_name = self.provider.name if self.provider else "Unknown"
-        return f"1 {base} = {self.provider_rate} {quote} ({provider_name})"
+        return f"1 {quote} = {self.provider_rate} {base} ({provider_name})"

@@ -1,0 +1,117 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block after_field_sets %}
+{{ block.super }}
+
+<style>
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.stats-table th, .stats-table td {
+  padding: 8px;
+  text-align: left;
+}
+.stats-table thead th {
+  background: var(--header-bg, #417690);
+  color: white;
+}
+.stats-table tr:hover { background: var(--selected-row, #f0f0f0); }
+.stats-table tr.selected { background: var(--selected-row, #f0f0f0); font-weight: 600; }
+.link_class {
+  color: var(--link-fg, #417690);
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+.link_class a {
+  color: var(--link-fg, #417690);
+  text-decoration: none;
+}
+</style>
+
+{% if original and original.pk %}
+<div class="module aligned">
+    {% if account_transactions %}
+    {% with transactions=account_transactions %}
+    <table class="stats-table">
+        <thead>
+        <tr>
+            <th>Transaction</th>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Description</th>
+            <th>Totals Match</th>
+            <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for transaction in transactions %}
+        <tr onclick="window.open('{% url 'admin:transaction_transaction_change' transaction.pk %}', '_blank')" style="cursor:pointer;">
+            <th class="link_class">
+                <a>{{ transaction.get_transaction_type_display }}{% if transaction.category.name or transaction.store.name %} - {% if transaction.category.name %}{{ transaction.category.name }}{% endif %}{% if transaction.category.name and transaction.store.name %} {% endif %}{% if transaction.store.name %}{{ transaction.store.name }}{% endif %}{% endif %}</a>
+            </th>
+            <td>{{ transaction.date|date:"d-M-Y H:i" }}</td>
+            <td style="text-align:right;">
+                {% if transaction.transaction_type == "debit" or transaction.transaction_type == "transfer_debit" %}-{% endif %}
+                {{ transaction.amount|floatformat:2 }}
+            </td>
+            <td>{{ transaction.currency.code|default:"—" }}</td>
+            <td>{{ transaction.description|default:"—"|truncatewords:10 }}</td>
+            <td>
+                {% if transaction.totals_match is None %}
+                    <img src="{% static 'admin/img/icon-unknown.svg' %}" alt="None" title="None">
+                {% elif transaction.totals_match %}
+                    <img src="{% static 'admin/img/icon-yes.svg' %}" alt="True" title="True">
+                {% else %}
+                    <img src="{% static 'admin/img/icon-no.svg' %}" alt="False" title="False">
+                {% endif %}
+            </td>
+            <td onclick="event.stopPropagation();">
+                <a href="{% url 'admin:transaction_transaction_delete' transaction.pk %}" class="button" style="padding: 5px 10px; font-size: 11px; background-color: #ba2121; color: white;">
+                    Delete
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    
+    <!-- Pagination -->
+    {% if transactions.has_other_pages %}
+        <p class="paginator">
+            {% if transactions_page_range %}
+                {% for page_num in transactions_page_range %}
+                    {% if page_num == transactions.number %}
+                        <span class="this-page">{{ page_num }}</span>
+                    {% else %}
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'transactions_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}transactions_page={{ page_num }}" class="end">{{ page_num }}</a>
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                {% for page_num in transactions.paginator.page_range %}
+                    {% if page_num == transactions.number %}
+                        <span class="this-page">{{ page_num }}</span>
+                    {% else %}
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'transactions_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}transactions_page={{ page_num }}" class="end">{{ page_num }}</a>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </p>
+    {% endif %}
+    
+    <p style="margin-top: 10px;">
+        <strong>Total Transactions:</strong> {{ transactions_total_count|default:transactions.paginator.count }}
+        {% if transactions.has_other_pages %}
+            (Showing {{ transactions.start_index }}–{{ transactions.end_index }})
+        {% endif %}
+    </p>
+    {% endwith %}
+    {% else %}
+    <p style="color: #999; font-style: italic;">No transactions found for this account.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+

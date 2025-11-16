@@ -222,14 +222,14 @@ class TransactionAdmin(RestrictedAdmin):
     )
     fieldsets = (
         ("📄 Basic Details", {
-            "fields": ( "date", "transaction_type", "account", "to_account", "amount", "fee_amount", "to_amount", "store", "category",),
+            "fields": ( "date", "transaction_type", "account", "to_account", "currency", "amount", "transaction_currency_amount", "exchange_rate", "fee_amount", "to_amount", "store", "category",),
         }),
         ("🏦 Extra", {
-            "fields": ("currency", "description", "notes", "attachment"),
+            "fields": ("description", "notes", "attachment"),
             "classes": ("collapse",),
         }),
         ("🔄 Transfers/Currency Exchange", {
-            "fields": ("linked_transaction", "fee", "exchange_rate_record"),
+            "fields": ("linked_transaction", "fee", "exchange_rate_record_display", "exchange_rate_record"),
             "classes": ("collapse",),
         }),
         ("📊 Computed / Status", {
@@ -239,7 +239,7 @@ class TransactionAdmin(RestrictedAdmin):
     )
 
     ordering = ("-date",)
-    readonly_fields = ("linked_transaction", "fee", "exchange_rate_record", "processed", "view_attachment",
+    readonly_fields = ("linked_transaction", "fee", "exchange_rate_record_display", "processed", "view_attachment",
                         "created_at", "modified_at", "total_from_items", "totals_match")
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
     inlines = [TransactionItemInline]
@@ -291,18 +291,80 @@ class TransactionAdmin(RestrictedAdmin):
         to_account = form.cleaned_data.get("to_account")
         fee_amount = form.cleaned_data.get("fee_amount")
         to_amount = form.cleaned_data.get("to_amount")
+        manual_exchange_rate = form.cleaned_data.get("exchange_rate")
         
         # Handle transfer-specific logic (includes fee handling for transfers)
         if obj.transaction_type and "transfer" in obj.transaction_type and to_account:
             self.handle_transfer_transaction(request, obj, to_account, fee_amount, to_amount)
         else:
-            # Handle fee for non-transfer transactions
+            # Handle cross-currency transactions (non-transfer)
+            account_currency = getattr(obj.account, "currency", None) if obj.account else None
+            transaction_currency = obj.currency
+            
+            # Check if this is a cross-currency transaction
+            if account_currency and transaction_currency and account_currency != transaction_currency:
+                # The amount field contains the transaction currency amount (user input)
+                transaction_currency_amount = Decimal(str(obj.amount or 0))
+                
+                # Convert transaction currency amount to account currency amount
+                if transaction_currency_amount > 0:
+                    if manual_exchange_rate and manual_exchange_rate > 0:
+                        # Use manual exchange rate: account_amount = transaction_amount * exchange_rate
+                        # Exchange rate is: X account_currency = transaction_currency
+                        # So: account_amount = transaction_amount * X
+                        calculated_account_amount = transaction_currency_amount * Decimal(str(manual_exchange_rate))
+                        obj.amount = calculated_account_amount.quantize(Decimal("0.01"))
+                        obj.save(update_fields=["amount"])
+                        logger.info(
+                            f"[TransactionAdmin.save_model] Converted transaction amount {transaction_currency_amount} "
+                            f"to account amount {obj.amount} using rate {manual_exchange_rate}"
+                        )
+                    else:
+                        # Fetch market rate to calculate account amount
+                        market_rate = fetch_market_rate(
+                            base_code=getattr(account_currency, "code", str(account_currency)),
+                            quote_code=getattr(transaction_currency, "code", str(transaction_currency)),
+                            date_obj=obj.date or date.today(),
+                        )
+                        if market_rate:
+                            calculated_account_amount = transaction_currency_amount * Decimal(str(market_rate))
+                            obj.amount = calculated_account_amount.quantize(Decimal("0.01"))
+                            obj.save(update_fields=["amount"])
+                            logger.info(
+                                f"[TransactionAdmin.save_model] Converted transaction amount {transaction_currency_amount} "
+                                f"to account amount {obj.amount} using market rate {market_rate}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[TransactionAdmin.save_model] Could not fetch market rate, "
+                                f"keeping transaction amount as-is: {transaction_currency_amount}"
+                            )
+                
+                # Calculate transaction currency amount from account amount for exchange rate record
+                # This is the original input amount in transaction currency
+                calculated_transaction_amount = transaction_currency_amount
+                if obj.amount > 0 and transaction_currency_amount == 0:
+                    # If amount was already converted, calculate back
+                    if manual_exchange_rate and manual_exchange_rate > 0:
+                        # transaction_amount = account_amount / exchange_rate
+                        calculated_transaction_amount = Decimal(str(obj.amount)) / Decimal(str(manual_exchange_rate))
+                    elif obj.exchange_rate_record:
+                        calculated_transaction_amount = Decimal(str(obj.amount)) / Decimal(str(obj.exchange_rate_record.provider_rate))
+                
+                self.handle_cross_currency_transaction(
+                    request, obj, account_currency, transaction_currency, 
+                    float(calculated_transaction_amount) if calculated_transaction_amount > 0 else None,
+                    manual_exchange_rate
+                )
+            
+            # Handle fee for non-transfer transactions (fee is always in account currency)
+            account_currency_for_fee = account_currency or transaction_currency
             if fee_amount and fee_amount > 0:
                 create_fee_transaction(
                     parent_transaction=obj,
                     fee_amount=fee_amount,
                     user=request.user,
-                    currency=obj.currency,
+                    currency=account_currency_for_fee,  # Fee in account currency
                     store=obj.store,
                 )
             elif obj.fee:
@@ -379,6 +441,7 @@ class TransactionAdmin(RestrictedAdmin):
         custom_urls = [
             path("upload-bill/", self.admin_site.admin_view(self.upload_bill_view), name="transactions_upload_bill"),
             path("ajax/get-currency/", self.admin_site.admin_view(self.get_currency_from_account), name="transaction_get_currency"),
+            path("ajax/get-currency-code/", self.admin_site.admin_view(self.get_currency_code), name="transaction_get_currency_code"),
             path("ajax/get-category/", self.admin_site.admin_view(self.get_category_from_store), name="transaction_get_category"),
         ]
         return custom_urls + urls
@@ -617,6 +680,36 @@ class TransactionAdmin(RestrictedAdmin):
             return format_html('<a href="{}" target="_blank">📎 View File ({})</a>', url, filename)
 
     view_attachment.short_description = "Invoice"
+    
+    def exchange_rate_record_display(self, obj):
+        """Display exchange rate record with currency information."""
+        if not obj or not obj.exchange_rate_record:
+            return "—"
+        
+        exch = obj.exchange_rate_record
+        base_currency = getattr(exch.base_currency, "code", "") if exch.base_currency else ""
+        quote_currency = getattr(exch.quote_currency, "code", "") if exch.quote_currency else ""
+        provider_rate = exch.provider_rate
+        
+        if base_currency and quote_currency and provider_rate:
+            # Format: Exchange Rate: 1.1 USD = 1 EUR (Rate: 1.1)
+            return format_html(
+                '<strong>Exchange Rate:</strong> {} {} = 1 {} (Rate: {})',
+                provider_rate,
+                base_currency,
+                quote_currency,
+                provider_rate
+            )
+        elif base_currency and quote_currency:
+            return format_html(
+                '<strong>Exchange Rate:</strong> {} → {}',
+                base_currency,
+                quote_currency
+            )
+        else:
+            return str(exch)
+    
+    exchange_rate_record_display.short_description = "Exchange Rate Record"
 
     def get_currency_from_account(self, request):
         """Return currency for a selected account."""
@@ -631,6 +724,20 @@ class TransactionAdmin(RestrictedAdmin):
             })
         except Account.DoesNotExist:
             return JsonResponse({"error": "Invalid account id"}, status=404)
+
+    def get_currency_code(self, request):
+        """Return currency code for a selected currency."""
+        from catalog.models import Currency
+        currency_id = request.GET.get("currency_id")
+        if not currency_id:
+            return JsonResponse({"error": "No currency id provided"}, status=400)
+        try:
+            currency = Currency.objects.get(id=currency_id)
+            return JsonResponse({
+                "currency_code": currency.code if currency else None,
+            })
+        except Currency.DoesNotExist:
+            return JsonResponse({"error": "Invalid currency id"}, status=404)
 
     def get_category_from_store(self, request):
         """Return category for a selected store."""
@@ -858,6 +965,121 @@ class TransactionAdmin(RestrictedAdmin):
         except Exception as e:
             logger.exception(f"[{func_name}] Error handling transfer for {obj.id}: {e}")
             self.message_user(request, f"⚠️ Error creating mirror/fee/exchange records: {e}", level="error")
+
+    @db_transaction.atomic
+    def handle_cross_currency_transaction(self, request, obj, account_currency, transaction_currency, 
+                                        transaction_currency_amount=None, manual_exchange_rate=None):
+        """
+        Handle cross-currency transactions (non-transfer).
+        Creates exchange rate record and ensures proper currency handling.
+        
+        Args:
+            request: HTTP request
+            obj: Transaction instance
+            account_currency: Currency of the account
+            transaction_currency: Currency of the transaction
+            transaction_currency_amount: Amount in transaction currency (if different from obj.amount)
+            manual_exchange_rate: Manual exchange rate (X account_currency = transaction_currency)
+        """
+        func_name = "handle_cross_currency_transaction"
+        
+        try:
+            from_amount = Decimal(str(obj.amount or 0))
+            transaction_amount = Decimal(str(transaction_currency_amount or 0))
+            
+            # Calculate exchange rate
+            # Exchange rate direction: X account_currency = transaction_currency
+            # So if account has 110 USD and transaction is 100 EUR, rate = 110/100 = 1.1 (1.1 USD = 1 EUR)
+            if manual_exchange_rate and manual_exchange_rate > 0:
+                provider_rate = Decimal(str(manual_exchange_rate))
+            elif transaction_currency_amount and transaction_currency_amount > 0 and from_amount > 0:
+                # Calculate from amounts: provider_rate = account_amount / transaction_currency_amount
+                # This gives: provider_rate account_currency = transaction_currency
+                provider_rate = (from_amount / transaction_amount).quantize(Decimal("0.0001"))
+            else:
+                # If no transaction currency amount provided, we can't calculate the rate
+                # Will use market rate as fallback
+                provider_rate = None
+            
+            # Fetch market rate
+            market_rate = fetch_market_rate(
+                base_code=getattr(account_currency, "code", str(account_currency)),
+                quote_code=getattr(transaction_currency, "code", str(transaction_currency)),
+                date_obj=obj.date or date.today(),
+            )
+            
+            # Use market rate as provider_rate if not calculated
+            if provider_rate is None:
+                provider_rate = market_rate if market_rate else Decimal("1")
+                logger.info(f"[{func_name}] Using market rate as provider rate: {provider_rate}")
+            
+            # Calculate fee percent (if fee exists)
+            fee_percent = Decimal("0")
+            if obj.fee and obj.fee.amount:
+                fee_amount = Decimal(str(obj.fee.amount))
+                fee_percent = (float(fee_amount) / float(from_amount)) * 100 if from_amount > 0 else Decimal("0")
+            
+            # Get or create exchange rate record
+            exchange_rate_record = getattr(obj, "exchange_rate_record", None)
+            
+            # Determine provider (from store or account institution)
+            provider = None
+            if obj.store:
+                provider, _ = Institution.objects.get_or_create(
+                    short_name__iexact=obj.store.name,
+                    defaults={"short_name": obj.store.name.strip(), "created_by": request.user},
+                )
+            elif obj.account and obj.account.institution:
+                provider = obj.account.institution
+            
+            if not exchange_rate_record:
+                exchange_rate_record = ExchangeRateRecord.objects.create(
+                    base_currency=account_currency,
+                    quote_currency=transaction_currency,
+                    provider_rate=provider_rate,
+                    market_rate=market_rate,
+                    fee_percent=fee_percent,
+                    provider=provider,
+                    created_by=request.user,
+                    date=obj.date,
+                )
+                logger.info(
+                    f"[{func_name}] Created exchange rate record {exchange_rate_record.id} "
+                    f"for transaction {obj.id}: 1 {account_currency.code} = {provider_rate} {transaction_currency.code}"
+                )
+            else:
+                # Update existing record
+                exchange_rate_record.base_currency = account_currency
+                exchange_rate_record.quote_currency = transaction_currency
+                exchange_rate_record.provider_rate = provider_rate
+                exchange_rate_record.market_rate = market_rate
+                exchange_rate_record.fee_percent = fee_percent
+                exchange_rate_record.provider = provider
+                exchange_rate_record.date = obj.date
+                exchange_rate_record.save()
+                logger.info(
+                    f"[{func_name}] Updated exchange rate record {exchange_rate_record.id} "
+                    f"for transaction {obj.id}: 1 {account_currency.code} = {provider_rate} {transaction_currency.code}"
+                )
+            
+            # Link exchange rate record to transaction
+            obj.exchange_rate_record = exchange_rate_record
+            
+            # Change transaction currency to account currency after exchange rate record is created
+            # The amount is now stored in account currency, so transaction currency should match
+            if obj.currency != account_currency:
+                old_currency = obj.currency
+                obj.currency = account_currency
+                logger.info(
+                    f"[{func_name}] Changed transaction currency from {old_currency.code} "
+                    f"to {account_currency.code} for transaction {obj.id}"
+                )
+            
+            obj.save(update_fields=["exchange_rate_record", "currency"])
+            
+        except Exception as e:
+            logger.exception(f"[{func_name}] Error handling cross-currency transaction: {e}")
+            # Don't fail the transaction save, just log the error
 
 # -----------------------------------
 # TRANSACTION ITEM ADMIN

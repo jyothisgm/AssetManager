@@ -1,3 +1,4 @@
+{% load static %}
 {% if selected_transactions %}
     <h3>
         {{ selected_category }} ({{ selected_currency }})
@@ -5,24 +6,45 @@
     <table class="stats-table">
         <thead>
         <tr>
+            <th>Transaction</th>
             <th>Date</th>
-            <th>Account</th>
-            <th>Store</th>
-            <th>Category</th>
-            <th style="text-align:right;">Amount</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Description</th>
+            <th>Totals Match</th>
+            <th>Actions</th>
         </tr>
         </thead>
         <tbody>
         {% for t in selected_transactions %}
         <tr onclick="window.open('{% url 'admin:transaction_transaction_change' t.id %}', '_blank')" style="cursor:pointer;">
-            <th class="link_class"><a>{{ t.date|date:"d-M-Y H:i" }}</a></th>
-            <td>{{ t.account.name|default:"—" }}</td>
-            <th class="link_class"><a>{{ t.store.name|default:"—" }}</a></th>
-            <td>{{ t.category.name|default:"—" }}</td>
-            <td style="text-align:right;">{{ t.amount|floatformat:2 }}</td>
+            <th class="link_class">
+                <a>{{ t.get_transaction_type_display }}{% if t.category.name or t.store.name %} - {% if t.category.name %}{{ t.category.name }}{% endif %}{% if t.category.name and t.store.name %} {% endif %}{% if t.store.name %}{{ t.store.name }}{% endif %}{% endif %}</a>
+            </th>
+            <td>{{ t.date|date:"d-M-Y H:i" }}</td>
+            <td style="text-align:right;">
+                {% if t.transaction_type == "debit" or t.transaction_type == "transfer_debit" %}-{% endif %}
+                {{ t.amount|floatformat:2 }}
+            </td>
+            <td>{{ t.currency.code|default:"—" }}</td>
+            <td>{{ t.description|default:"—"|truncatewords:10 }}</td>
+            <td>
+                {% if t.totals_match is None %}
+                    <img src="{% static 'admin/img/icon-unknown.svg' %}" alt="None" title="None">
+                {% elif t.totals_match %}
+                    <img src="{% static 'admin/img/icon-yes.svg' %}" alt="True" title="True">
+                {% else %}
+                    <img src="{% static 'admin/img/icon-no.svg' %}" alt="False" title="False">
+                {% endif %}
+            </td>
+            <td onclick="event.stopPropagation();">
+                <a href="{% url 'admin:transaction_transaction_delete' t.pk %}" class="button" style="padding: 5px 10px; font-size: 11px; background-color: #ba2121; color: white;">
+                    Delete
+                </a>
+            </td>
         </tr>
         {% empty %}
-        <tr><td colspan="5" style="text-align:center;">No transactions found</td></tr>
+        <tr><td colspan="7" style="text-align:center;">No transactions found</td></tr>
         {% endfor %}
         </tbody>
     </table>

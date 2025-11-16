@@ -200,6 +200,10 @@ function showTransactions(category, currency, type) {
 
 /* --- Tabs & Charts --- */
 function showTab(code, type) {
+  // Clear transactions table when switching tabs
+  document.getElementById("transactionsContainer").innerHTML = '';
+  document.querySelectorAll('.stats-table tr').forEach(tr => tr.classList.remove('selected'));
+  
   document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
   document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
   document.getElementById(`tab-${code}`).style.display = 'block';

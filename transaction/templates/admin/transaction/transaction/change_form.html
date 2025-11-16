@@ -6,6 +6,29 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+    
+    // Get exchange rate record data from the form
+    // Check if instance has exchange_rate_record (form sets initial values when it exists)
+    {% if original and original.exchange_rate_record %}
+    const hasExchangeRateRecordFromForm = true;
+    // Calculate transaction currency amount from exchange rate record directly
+    // transaction_amount = account_amount / exchange_rate
+    // exchange_rate is: X account_currency = transaction_currency
+    {% if original.amount and original.exchange_rate_record.provider_rate %}
+    const transactionCurrencyAmountInitial = {{ original.amount|floatformat:2 }} / {{ original.exchange_rate_record.provider_rate }};
+    {% else %}
+    const transactionCurrencyAmountInitial = null;
+    {% endif %}
+    const exchangeRateInitial = {% if original.exchange_rate_record.provider_rate %}{{ original.exchange_rate_record.provider_rate }}{% else %}null{% endif %};
+    // Get transaction currency code from exchange rate record (quote_currency)
+    // This is the actual transaction currency, not the account currency
+    const transactionCurrencyCodeFromExchange = {% if original.exchange_rate_record.quote_currency.code %}"{{ original.exchange_rate_record.quote_currency.code }}"{% else %}null{% endif %};
+    {% else %}
+    const transactionCurrencyAmountInitial = null;
+    const exchangeRateInitial = null;
+    const hasExchangeRateRecordFromForm = false;
+    const transactionCurrencyCodeFromExchange = null;
+    {% endif %}
 
     // --- Cached DOM elements ---
     const txType        = document.getElementById('id_transaction_type');
@@ -16,6 +39,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const categorySel   = document.getElementById('id_category');
     const feeField      = document.getElementById('id_fee_amount');
     const toAmountField = document.getElementById('id_to_amount');
+    const transactionCurrencyAmountField = document.getElementById('id_transaction_currency_amount');
+    const exchangeRateField = document.getElementById('id_exchange_rate');
+    const amountField = document.getElementById('id_amount');
 
     // Labels
     const accountLabel  = document.querySelector("label[for='id_account']");
@@ -23,15 +49,19 @@ document.addEventListener('DOMContentLoaded', function () {
     const amountLabel   = document.querySelector("label[for='id_amount']");
     const feeLabel      = document.querySelector("label[for='id_fee_amount']");
     const toAmountLabel = document.querySelector("label[for='id_to_amount']");
+    const transactionCurrencyAmountLabel = document.querySelector("label[for='id_transaction_currency_amount']");
 
     // Field containers
     const feeRow        = feeField ? feeField.closest('.form-row, .form-group, .field-box') : null;
     const toAccountRow  = toAccountSel ? toAccountSel.closest('.form-row, .form-group, .field-box') : null;
     const toAmountRow   = toAmountField ? toAmountField.closest('.form-row, .form-group, .field-box') : null;
+    const transactionCurrencyAmountRow = transactionCurrencyAmountField ? transactionCurrencyAmountField.closest('.form-row, .form-group, .field-box') : null;
+    const exchangeRateRow = exchangeRateField ? exchangeRateField.closest('.form-row, .form-group, .field-box') : null;
 
     // --- State ---
     let fromCurrency = null;
     let toCurrency   = null;
+    let accountCurrency = null;
 
     /* ============================
         Utility helpers
@@ -47,6 +77,88 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!accountId) return cb(null);
         fetchJSON(`/admin/transaction/transaction/ajax/get-currency/?account_id=${accountId}`, data => {
             cb(data.currency_name || null);
+        });
+    }
+
+    function fetchCurrencyCode(currencyId, cb) {
+        if (!currencyId) return cb(null);
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency-code/?currency_id=${currencyId}`, data => {
+            cb(data.currency_code || null);
+        });
+    }
+
+    function checkCrossCurrencyFields() {
+        // Check if exchange rate record exists from form data
+        // The form sets transaction_currency_amount initial value when exchange_rate_record exists
+        let hasRecord = hasExchangeRateRecordFromForm;
+        
+        // Also check if the field is readonly (set by form when exchange_rate_record exists)
+        const isReadonlyFromForm = transactionCurrencyAmountField && 
+                                   (transactionCurrencyAmountField.hasAttribute('readonly') || 
+                                    transactionCurrencyAmountField.classList.contains('readonly'));
+        
+        // Use form data or readonly attribute to determine if record exists
+        const hasExchangeRateRecord = hasRecord || isReadonlyFromForm;
+        
+        // Check if transaction currency differs from account currency
+        const currencyId = currencySel?.value;
+        if (!currencyId || !accountCurrency) {
+            // Hide fields if no currency selected or no account currency
+            if (transactionCurrencyAmountRow) transactionCurrencyAmountRow.style.display = 'none';
+            if (exchangeRateRow) exchangeRateRow.style.display = 'none';
+            // Make amount field editable if not cross-currency
+            if (amountField) {
+                amountField.removeAttribute('readonly');
+                amountField.classList.remove('readonly');
+                amountField.placeholder = '';
+            }
+            return;
+        }
+        
+        // Fetch transaction currency code
+        fetchCurrencyCode(currencyId, transactionCurrency => {
+            const isCrossCurrency = accountCurrency && transactionCurrency && accountCurrency !== transactionCurrency;
+            
+            // Show transaction currency amount field ONLY if exchange rate record exists
+            if (transactionCurrencyAmountRow) {
+                transactionCurrencyAmountRow.style.display = hasExchangeRateRecord ? '' : 'none';
+            }
+            
+            // Show exchange rate field if cross-currency
+            if (exchangeRateRow) {
+                exchangeRateRow.style.display = isCrossCurrency ? '' : 'none';
+            }
+            // Transaction currency amount field is readonly (calculated from account amount / exchange rate)
+            if (hasExchangeRateRecord && transactionCurrencyAmountField) {
+                // Transaction currency amount is readonly when exchange rate record exists
+                transactionCurrencyAmountField.setAttribute('readonly', 'readonly');
+                transactionCurrencyAmountField.classList.add('readonly');
+                // Update label to include transaction currency code from exchange rate record
+                // (transaction currency is changed to account currency after exchange rate record is created)
+                if (transactionCurrencyAmountLabel) {
+                    if (transactionCurrencyCodeFromExchange) {
+                        transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrencyCodeFromExchange}):`;
+                    } else if (transactionCurrency) {
+                        transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrency}):`;
+                    }
+                }
+                // Calculate it from account amount and exchange rate
+                calculateTransactionCurrencyAmount();
+            } else if (transactionCurrencyAmountField) {
+                // No exchange rate record, make sure it's not readonly (though it should be hidden)
+                transactionCurrencyAmountField.removeAttribute('readonly');
+                transactionCurrencyAmountField.classList.remove('readonly');
+                // Reset label
+                if (transactionCurrencyAmountLabel) {
+                    transactionCurrencyAmountLabel.textContent = 'Transaction amount:';
+                }
+            }
+            if (!isCrossCurrency && amountField) {
+                // Not cross-currency, make sure amount is editable
+                amountField.removeAttribute('readonly');
+                amountField.classList.remove('readonly');
+                amountField.placeholder = '';
+            }
         });
     }
 
@@ -151,11 +263,98 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Bind account events
     bindSelectEvents(accountSel, id => {
-        fetchCurrency(id, code => { fromCurrency = code; checkCurrencyDifference(); });
+        fetchCurrency(id, code => { 
+            fromCurrency = code;
+            accountCurrency = code;
+            checkCurrencyDifference();
+            checkCrossCurrencyFields();
+        });
     });
     bindSelectEvents(toAccountSel, id => {
         fetchCurrency(id, code => { toCurrency = code; checkCurrencyDifference(); });
     });
+    
+    // Bind currency selector to check cross-currency
+    bindSelectEvents(currencySel, () => {
+        checkCrossCurrencyFields();
+    });
+    
+    // Update transaction currency amount label when currency changes
+    function updateTransactionCurrencyAmountLabel() {
+        if (!transactionCurrencyAmountLabel || !hasExchangeRateRecordFromForm) return;
+        
+        // If we have the currency code from the exchange rate record, use that
+        // (because after exchange rate record is created, transaction currency is changed to account currency)
+        if (transactionCurrencyCodeFromExchange) {
+            transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrencyCodeFromExchange}):`;
+            return;
+        }
+        
+        // Fallback: try to get from currency selector
+        const currencyId = currencySel?.value;
+        if (currencyId) {
+            fetchCurrencyCode(currencyId, transactionCurrency => {
+                if (transactionCurrency && transactionCurrencyAmountLabel) {
+                    transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrency}):`;
+                }
+            });
+        }
+    }
+    
+    // Bind currency change to update label
+    if (currencySel) {
+        currencySel.addEventListener('change', updateTransactionCurrencyAmountLabel);
+    }
+    
+    // Calculate transaction currency amount from account amount and exchange rate
+    // This is calculated in Python (backend), but we update it in real-time when fields change
+    function calculateTransactionCurrencyAmount() {
+        if (!transactionCurrencyAmountField || !amountField) return;
+        
+        // Only calculate if transaction_currency_amount is readonly (exchange rate record exists)
+        const isReadonly = transactionCurrencyAmountField.hasAttribute('readonly') || 
+                            transactionCurrencyAmountField.classList.contains('readonly');
+        if (!isReadonly) {
+            return;
+        }
+        
+        const accountAmount = parseFloat(amountField.value);
+        
+        // Get exchange rate from the Exchange Rate field (this is the source of truth)
+        let exchangeRate = null;
+        if (exchangeRateField && exchangeRateField.value) {
+            exchangeRate = parseFloat(exchangeRateField.value);
+        }
+        
+        // If exchange rate field is empty, try to use the initial value from form
+        if ((!exchangeRate || exchangeRate === 0 || isNaN(exchangeRate)) && hasExchangeRateRecordFromForm && exchangeRateInitial) {
+            exchangeRate = parseFloat(exchangeRateInitial);
+        }
+        
+        // Calculate transaction amount using the exchange rate from the Exchange Rate field
+        if (accountAmount && accountAmount > 0 && exchangeRate && exchangeRate > 0 && !isNaN(exchangeRate)) {
+            // Calculate: transaction_amount = account_amount / exchange_rate
+            // Exchange rate is: X account_currency = transaction_currency
+            // So: transaction_amount = account_amount / X
+            const calculatedTransactionAmount = (accountAmount / exchangeRate).toFixed(2);
+            transactionCurrencyAmountField.value = calculatedTransactionAmount;
+        } else if (hasExchangeRateRecordFromForm && transactionCurrencyAmountInitial) {
+            // Fallback: use the initial value calculated by Python backend
+            transactionCurrencyAmountField.value = parseFloat(transactionCurrencyAmountInitial).toFixed(2);
+        }
+    }
+    
+    // Bind events to recalculate transaction currency amount when account amount or exchange rate changes
+    // This provides real-time updates, but the initial calculation is done in Python
+    if (amountField) {
+        amountField.addEventListener('input', calculateTransactionCurrencyAmount);
+        amountField.addEventListener('blur', calculateTransactionCurrencyAmount);
+    }
+    if (exchangeRateField) {
+        exchangeRateField.addEventListener('input', calculateTransactionCurrencyAmount);
+        exchangeRateField.addEventListener('blur', calculateTransactionCurrencyAmount);
+        exchangeRateField.addEventListener('change', calculateTransactionCurrencyAmount);
+    }
 
     // Bind store/category autofill
     bindSelectEvents(storeSel, id => {
@@ -180,11 +379,46 @@ document.addEventListener('DOMContentLoaded', function () {
     const initialAccountId  = accountSel?.value;
     const initialToAccountId = toAccountSel?.value;
     if (initialAccountId)
-        fetchCurrency(initialAccountId, code => { fromCurrency = code; checkCurrencyDifference(); });
+        fetchCurrency(initialAccountId, code => { 
+            fromCurrency = code;
+            accountCurrency = code;
+            checkCurrencyDifference();
+            checkCrossCurrencyFields();
+        });
     if (initialToAccountId)
         fetchCurrency(initialToAccountId, code => { toCurrency = code; checkCurrencyDifference(); });
 
     toggleTransferFields();
+    checkCrossCurrencyFields();
+    
+    // Initial calculation on page load if exchange rate record exists
+    // Update label with currency code first
+    if (hasExchangeRateRecordFromForm) {
+        updateTransactionCurrencyAmountLabel();
+    }
+
+    // Wait a bit for all fields to be ready, then set the value
+    if (hasExchangeRateRecordFromForm) {
+        setTimeout(() => {
+            if (transactionCurrencyAmountField) {
+                // First, try to get value from data attribute (set by Python)
+                let initialValue = transactionCurrencyAmountField.getAttribute('data-initial-value');
+                if (!initialValue && transactionCurrencyAmountInitial !== null && transactionCurrencyAmountInitial !== undefined) {
+                    initialValue = transactionCurrencyAmountInitial;
+                }
+                // If we have an initial value, set it
+                if (initialValue) {
+                    const value = parseFloat(initialValue);
+                    if (!isNaN(value)) {
+                        transactionCurrencyAmountField.value = value.toFixed(2);
+                        console.log(`[TransactionForm] Set transaction currency amount: ${value.toFixed(2)}`);
+                    }
+                }
+                // Then recalculate to ensure it's in sync with current field values
+                calculateTransactionCurrencyAmount();
+            }
+        }, 300);
+    }
 });
 </script>
 {% endblock %}
