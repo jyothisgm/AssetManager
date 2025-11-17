@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.urls import reverse
 from .models import Attachment, User, Role
 from common.logging_config import logger
 from django.contrib import messages
@@ -9,7 +8,6 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.admin.sites import site
 from django.utils.safestring import mark_safe
 from django.utils.html import format_html
-from django.template.response import TemplateResponse
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter
 from django.contrib.admin import SimpleListFilter
 from django.contrib.contenttypes.models import ContentType

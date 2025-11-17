@@ -1,14 +1,14 @@
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 from account.models import Account
 from common.models import Unit
 from catalog.models import Currency, ExchangeRateRecord, Store, Product, PurchaseCategory
-import uuid
 from user.models import Attachment, BaseUserModel
 from django.db.models import Sum, Case, When, F, Q, DecimalField, FloatField
 from common.logging_config import logger
-from django.conf import settings
 
 import os
 from datetime import datetime
@@ -115,7 +115,7 @@ class Transaction(BaseUserModel):
     )
 
     def __str__(self):
-        return f"{self.get_transaction_type_display()} {self.amount} ({self.date.date()})"
+        return f"{self.get_transaction_type_display()} - {self.category.name if self.category else ''} {self.store.name if self.store else ''} {self.amount} ({self.date.date()})"
 
     @property
     def total_from_items(self):
@@ -223,6 +223,32 @@ class TransactionItem(BaseUserModel):
                 logger.exception(f"[TransactionItem.delete] Failed to update totals for Transaction {txn.id}")
 
 
+class TransactionSplit(BaseUserModel):
+    """
+    Represents a split of a transaction amount among friends.
+    Tracks which user owes what amount for a given transaction.
+    """
+    transaction = models.ForeignKey(Transaction, related_name="splits", on_delete=models.CASCADE, help_text="The transaction this split belongs to")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="transaction_splits", on_delete=models.CASCADE, help_text="The user who owes this amount")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Amount this user owes")
+    notes = models.JSONField(blank=True, null=True, default=dict, help_text="Optional notes and split method metadata stored as JSON")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Transaction Split"
+        verbose_name_plural = "Transaction Splits"
+        unique_together = [("transaction", "user")]  # Prevent duplicate splits for same user
+
+    def __str__(self):
+        user_name = self.user.email if hasattr(self.user, 'email') else str(self.user)
+        return f"{user_name}: {self.amount}"
+
+    def save(self, *args, **kwargs):
+        """Validate before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -243,3 +269,11 @@ def update_transaction_total_match_on_save(sender, instance, created, **kwargs):
         logger.exception(
             f"[post_save] Error updating totals_match for Transaction ID={instance.id}: {e}"
         )
+
+
+class OwesDummyModel(models.Model):
+    """Dummy model to create an admin entry for the Owes view."""
+    class Meta:
+        managed = False
+        verbose_name = "Owes"
+        verbose_name_plural = "Owes"

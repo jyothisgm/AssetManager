@@ -1,7 +1,9 @@
 from django import forms
+from django.forms import BaseInlineFormSet
+from decimal import Decimal
 from account.models import Account
 from common.models import Currency, Unit
-from transaction.models import Transaction, TransactionItem
+from transaction.models import Transaction, TransactionItem, TransactionSplit
 from catalog.models import Brand, Product, PurchaseCategory, Store
 from common.logging_config import logger
 from dal import autocomplete
@@ -213,6 +215,19 @@ class TransactionForm(forms.ModelForm):
         label="Exchange rate (optional)",
         help_text="Manual exchange rate (X account_currency = transaction_currency). If not provided, will be calculated from amounts or fetched from market."
     )
+    
+    split_method = forms.ChoiceField(
+        choices=[
+            ('equally', 'Equally'),
+            ('unequally', 'Unequally (Manual Amount)'),
+            ('percentage', 'By Percentage'),
+            ('shares', 'By Shares'),
+        ],
+        required=False,
+        initial='equally',
+        label="Split Method",
+        help_text="How to split this transaction among friends (applies to all splits)"
+    )
 
     class Meta:
         model = Transaction
@@ -232,6 +247,20 @@ class TransactionForm(forms.ModelForm):
             self.fields["to_account"].queryset = Account.objects.none()
 
         instance = kwargs.get("instance")
+        
+        # Prefill split_method from existing splits or default to 'equally'
+        if instance and instance.pk:
+            first_split = instance.splits.filter(is_deleted=False).first()
+            if first_split and first_split.notes and isinstance(first_split.notes, dict):
+                split_method = first_split.notes.get('split_method', 'equally')
+                if not self.initial.get("split_method"):
+                    self.fields["split_method"].initial = split_method
+                    self.initial["split_method"] = split_method
+        else:
+            # New transaction, default to 'equally'
+            if not self.initial.get("split_method"):
+                self.fields["split_method"].initial = 'equally'
+                self.initial["split_method"] = 'equally'
         
         # Prefill "fee_amount" for any transaction with a fee
         if instance and instance.fee and not self.initial.get("fee_amount"):
@@ -295,3 +324,138 @@ class TransactionForm(forms.ModelForm):
             # Prefill "fee_amount" from linked transaction if not already set
             if linked.fee and not self.initial.get("fee_amount") and not instance.fee:
                 self.fields["fee_amount"].initial = linked.fee.amount
+
+
+class TransactionSplitFormSet(BaseInlineFormSet):
+    """Custom formset for TransactionSplit with validation."""
+    
+    def save(self, commit=True):
+        """Override save to handle existing splits (including deleted ones)."""
+        from transaction.models import TransactionSplit
+        
+        transaction = self.instance
+        if not transaction or not transaction.pk:
+            # New transaction - just use parent save
+            return super().save(commit=commit)
+        
+        # Get all forms that are not marked for deletion
+        forms_to_save = [f for f in self.forms if f.cleaned_data and not f.cleaned_data.get("DELETE", False)]
+        
+        # Track which users we've processed to avoid duplicates within the formset
+        processed_users = set()
+        
+        # Before parent save, link existing splits to forms to avoid duplicates
+        for form in forms_to_save:
+            user = form.cleaned_data.get("user")
+            if not user:
+                continue
+            
+            # Check for duplicate within the formset itself
+            if user in processed_users:
+                # Mark this form for deletion to skip it
+                form.cleaned_data['DELETE'] = True
+                continue
+            processed_users.add(user)
+            
+            # Check if a split already exists for this transaction and user (including deleted)
+            existing_split = TransactionSplit.all_objects.filter(
+                transaction=transaction,
+                user=user
+            ).first()
+            
+            if existing_split:
+                # If it exists (even if deleted), restore and link it to the form
+                if existing_split.is_deleted:
+                    existing_split.is_deleted = False
+                
+                # Link the form instance to the existing split
+                # This way parent save will update it instead of creating a new one
+                form.instance = existing_split
+                form.instance.pk = existing_split.pk
+                
+                # Update fields from cleaned_data before save
+                for field_name, value in form.cleaned_data.items():
+                    if field_name not in ['DELETE', 'id', 'split_value'] and hasattr(form.instance, field_name):
+                        setattr(form.instance, field_name, value)
+        
+        # Now call parent save - it will handle everything correctly
+        # including setting new_objects, changed_objects, deleted_objects
+        return super().save(commit=commit)
+    
+    def clean(self):
+        """Validate that total of split amounts equals transaction amount and no duplicate users."""
+        errors = []
+        try:
+            super().clean()
+        except forms.ValidationError as e:
+            errors.extend(e.error_list)
+        
+        # Only validate if we have a transaction instance
+        if not self.instance:
+            if errors:
+                raise forms.ValidationError(errors)
+            return
+        
+        # Check for duplicate users within the formset (not in database - that's handled in save)
+        # This prevents the same user from appearing in multiple rows in the same form
+        seen_users = {}
+        for i, form in enumerate(self.forms):
+            if form.cleaned_data and not form.cleaned_data.get("DELETE", False):
+                user = form.cleaned_data.get("user")
+                if user:
+                    if user in seen_users:
+                        # Found duplicate user within the formset
+                        other_form_index = seen_users[user]
+                        errors.append(
+                            forms.ValidationError(
+                                f"Duplicate user: {user.email if hasattr(user, 'email') else user} appears in multiple split rows. "
+                                f"Each user can only have one split per transaction."
+                            )
+                        )
+                        # Mark both forms as having errors
+                        form.add_error('user', f"This user already appears in another split row.")
+                        if other_form_index is not None:
+                            self.forms[other_form_index].add_error('user', f"This user already appears in another split row.")
+                    else:
+                        seen_users[user] = i
+        
+        # Get transaction amount - use the amount from the instance
+        # For new transactions, the amount should be set in the main form
+        transaction_amount = Decimal(str(self.instance.amount or 0))
+        if transaction_amount == 0:
+            # No validation needed if transaction amount is 0
+            if errors:
+                raise forms.ValidationError(errors)
+            return
+        
+        # Calculate total of all split amounts (excluding deleted ones)
+        total_split_amount = Decimal("0")
+        valid_splits_count = 0
+        
+        for form in self.forms:
+            if form.cleaned_data and not form.cleaned_data.get("DELETE", False):
+                amount = form.cleaned_data.get("amount")
+                if amount is not None:
+                    try:
+                        total_split_amount += Decimal(str(amount))
+                        valid_splits_count += 1
+                    except (ValueError, TypeError):
+                        # Skip invalid amounts
+                        pass
+        
+        # Only validate if there are splits
+        if valid_splits_count > 0:
+            # Allow small tolerance for rounding errors (0.02)
+            tolerance = Decimal("0.02")
+            difference = abs(total_split_amount - transaction_amount)
+            
+            if difference > tolerance:
+                errors.append(
+                    forms.ValidationError(
+                        f"Total of split amounts ({total_split_amount:.2f}) must equal transaction amount ({transaction_amount:.2f}). "
+                        f"Difference: {difference:.2f}"
+                    )
+                )
+        
+        if errors:
+            raise forms.ValidationError(errors)

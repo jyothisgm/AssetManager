@@ -3,10 +3,13 @@ import mimetypes
 import os
 import uuid
 import pytz
-from datetime import timedelta
-from datetime import date
+from datetime import timedelta, date
+from collections import defaultdict
 
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect
 from django.db.models import Sum, Case, When, F, Q, DecimalField, Value, ExpressionWrapper
 from django.urls import path
@@ -21,8 +24,8 @@ from account.models import Account
 from catalog.exchange_rate import fetch_market_rate
 from catalog.models import ExchangeRateRecord, Institution, PurchaseCategory, Store
 from common.models import Unit
-from transaction.admin_forms import BulkEditTransactionForm, TransactionForm, TransactionItemInlineForm
-from transaction.models import Transaction, TransactionItem
+from transaction.admin_forms import BulkEditTransactionForm, TransactionForm, TransactionItemInlineForm, TransactionSplitFormSet
+from transaction.models import Transaction, TransactionItem, TransactionSplit, OwesDummyModel
 from transaction.invoice_handling import process_transaction_file
 from user.admin import RestrictedAdmin
 from django_admin_listfilter_dropdown.filters import RelatedOnlyDropdownFilter, DropdownFilter
@@ -33,6 +36,190 @@ from common.logging_config import logger
 from user.models import Attachment, get_attachment_type
 
 from transaction.admin_forms import BulkEditTransactionItemForm  # safe import here
+
+
+# -----------------------------------
+# TRANSACTION SPLIT ADMIN
+# -----------------------------------
+@admin.register(TransactionSplit)
+class TransactionSplitAdmin(RestrictedAdmin):
+    """Admin for TransactionSplit - allows direct deletion of splits."""
+    list_display = ('transaction', 'user', 'amount', 'created_at')
+    list_filter = ('created_at', ('transaction', RelatedOnlyDropdownFilter), ('user', RelatedOnlyDropdownFilter))
+    search_fields = ('transaction__description', 'user__email')
+    readonly_fields = ('id', 'created_at', 'modified_at', 'created_by')
+    
+    def has_add_permission(self, request):
+        """Disable adding splits directly - they should be added via Transaction inline."""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Disable editing splits directly - they should be edited via Transaction inline."""
+        return False
+
+
+def _render_owes_view(request, admin_site, model_opts):
+    """Shared function to render the owes view - shows merged net balances with all users."""
+    
+    User = get_user_model()
+    current_user = request.user
+    
+    # ============================================
+    # PART 1: Who the current user owes money to
+    # ============================================
+    # Get all splits where the current user owes money (user = current_user)
+    user_owes_splits = TransactionSplit.objects.filter(
+        user=current_user,
+        is_deleted=False
+    ).select_related('transaction', 'transaction__currency', 'transaction__account', 'transaction__created_by')
+    
+    # Group by owed_to user (transaction creator) and currency
+    # Structure: {owed_to_user: {currency: total_amount}}
+    owes_data = defaultdict(lambda: defaultdict(Decimal))
+    owes_details = defaultdict(lambda: defaultdict(list))
+    
+    for split in user_owes_splits:
+        # Get who the current user owes to (transaction creator)
+        owed_to_user = None
+        if split.transaction and split.transaction.created_by:
+            owed_to_user = split.transaction.created_by
+        
+        if not owed_to_user:
+            continue
+        
+        # Get currency from transaction or account
+        currency = None
+        currency_symbol = ""
+        if split.transaction:
+            currency = split.transaction.currency
+            if not currency and split.transaction.account:
+                currency = split.transaction.account.currency
+            
+            if currency:
+                currency_symbol = getattr(currency, 'symbol', None) or getattr(currency, 'code', '')
+        
+        currency_key = currency_symbol or 'Unknown'
+        owes_data[owed_to_user][currency_key] += Decimal(str(split.amount))
+        owes_details[owed_to_user][currency_key].append({
+            'transaction': split.transaction,
+            'amount': split.amount,
+            'date': split.transaction.date if split.transaction else None,
+        })
+    
+    # ============================================
+    # PART 2: Who owes money to the current user
+    # ============================================
+    # Get all splits where the current user is the transaction creator (gets money from others)
+    owed_by_splits = TransactionSplit.objects.filter(
+        transaction__created_by=current_user,
+        is_deleted=False
+    ).select_related('user', 'transaction', 'transaction__currency', 'transaction__account')
+    
+    # Group by user who owes (split.user) and currency
+    # Structure: {owed_by_user: {currency: total_amount}}
+    owed_by_data = defaultdict(lambda: defaultdict(Decimal))
+    owed_by_details = defaultdict(lambda: defaultdict(list))
+    
+    for split in owed_by_splits:
+        # Get who owes money to the current user (split.user)
+        owed_by_user = split.user
+        if not owed_by_user:
+            continue
+        
+        # Get currency from transaction or account
+        currency = None
+        currency_symbol = ""
+        if split.transaction:
+            currency = split.transaction.currency
+            if not currency and split.transaction.account:
+                currency = split.transaction.account.currency
+            
+            if currency:
+                currency_symbol = getattr(currency, 'symbol', None) or getattr(currency, 'code', '')
+        
+        currency_key = currency_symbol or 'Unknown'
+        owed_by_data[owed_by_user][currency_key] += Decimal(str(split.amount))
+        owed_by_details[owed_by_user][currency_key].append({
+            'transaction': split.transaction,
+            'amount': split.amount,
+            'date': split.transaction.date if split.transaction else None,
+        })
+    
+    # ============================================
+    # PART 3: Merge both sides and calculate net balance
+    # ============================================
+    # Combine all users from both sides
+    all_users = set()
+    all_users.update(owes_data.keys())
+    all_users.update(owed_by_data.keys())
+    
+    # Calculate net balance for each user and currency
+    # Negative = current user owes them, Positive = they owe current user
+    merged_data = []
+    
+    for user in all_users:
+        # Get what current user owes to this user (negative)
+        owes_to_this_user = owes_data.get(user, {})
+        owes_to_details = owes_details.get(user, {})
+        
+        # Get what this user owes to current user (positive)
+        this_user_owes = owed_by_data.get(user, {})
+        this_user_owes_details = owed_by_details.get(user, {})
+        
+        # Calculate net balance per currency
+        # net = (what they owe you) - (what you owe them)
+        # positive = they owe you, negative = you owe them
+        net_currency_totals = defaultdict(Decimal)
+        net_currency_details = defaultdict(lambda: {'owed_to': [], 'owed_by': []})
+        
+        # Process all currencies from both sides
+        all_currencies = set()
+        all_currencies.update(owes_to_this_user.keys())
+        all_currencies.update(this_user_owes.keys())
+        
+        for currency_key in all_currencies:
+            owed_to_amount = owes_to_this_user.get(currency_key, Decimal('0'))
+            owed_by_amount = this_user_owes.get(currency_key, Decimal('0'))
+            
+            # Net = what they owe you - what you owe them
+            net_amount = owed_by_amount - owed_to_amount
+            net_currency_totals[currency_key] = net_amount
+            
+            # Store details for both sides
+            if currency_key in owes_to_details:
+                net_currency_details[currency_key]['owed_to'] = owes_to_details[currency_key]
+            if currency_key in this_user_owes_details:
+                net_currency_details[currency_key]['owed_by'] = this_user_owes_details[currency_key]
+        
+        # Calculate total net amount across all currencies
+        total_net_amount = sum(net_currency_totals.values())
+        
+        # Only include if there's a non-zero balance
+        if total_net_amount != 0 or any(net_currency_totals.values()):
+            merged_data.append({
+                'user': user,
+                'net_currency_totals': dict(net_currency_totals),
+                'net_currency_details': dict(net_currency_details),
+                'total_net_amount': total_net_amount,
+                'owed_to_totals': dict(owes_to_this_user),
+                'owed_by_totals': dict(this_user_owes),
+            })
+    
+    # Sort by absolute net amount, highest first
+    merged_data.sort(
+        key=lambda x: abs(x['total_net_amount']),
+        reverse=True
+    )
+    
+    context = dict(
+        admin_site.each_context(request),
+        title=f"Owes Summary - {current_user.email}",
+        merged_data=merged_data,
+        current_user=current_user,
+        opts=model_opts,
+    )
+    
+    return render(request, "admin/transaction/owes.html", context)
 
 
 def _D(val):
@@ -170,6 +357,7 @@ class TransactionItemInline(admin.TabularInline):
     fields = ("product", "category_display", "quantity", "unit", "price")
     autocomplete_fields = ("product", )
     show_change_link = False
+    classes = ('collapse',)
 
     def brand_display(self, obj):
         return obj.product.brand.name if obj.product and obj.product.brand else "-"
@@ -191,6 +379,104 @@ class TransactionItemInline(admin.TabularInline):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
+class TransactionSplitInlineForm(forms.ModelForm):
+    """Custom form for TransactionSplit - split method is now in main Transaction form."""
+    split_value = forms.DecimalField(
+        required=False,
+        max_digits=10,
+        decimal_places=2,
+        widget=forms.NumberInput(attrs={'class': 'split-value-input', 'step': '0.01', 'placeholder': 'Enter value'}),
+        help_text="Percentage (0-100) for percentage method, or shares count for shares method",
+        label="Value"
+    )
+
+    class Meta:
+        model = TransactionSplit
+        fields = '__all__'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Get split_value from existing data in notes JSONField
+        if self.instance and self.instance.pk and self.instance.notes:
+            notes = self.instance.notes if isinstance(self.instance.notes, dict) else {}
+            split_value = notes.get('split_value')
+            if split_value:
+                self.fields['split_value'].initial = split_value
+        
+        # Make form-only fields not required
+        self.fields['split_value'].required = False
+    
+    def save(self, commit=True):
+        # Store split_value in notes JSONField (split_method is stored from main form)
+        instance = super().save(commit=False)
+        
+        # Initialize notes as dict if None
+        if instance.notes is None:
+            instance.notes = {}
+        elif not isinstance(instance.notes, dict):
+            instance.notes = {}
+        
+        # Store split value metadata in notes
+        split_value = self.cleaned_data.get('split_value')
+        
+        if split_value is not None:
+            instance.notes['split_value'] = float(split_value)
+        elif 'split_value' in instance.notes:
+            del instance.notes['split_value']
+        
+        # Note: split_method is stored from the main Transaction form's save_model method
+        
+        if commit:
+            instance.save()
+        return instance
+
+
+class TransactionSplitInline(admin.TabularInline):
+    model = TransactionSplit
+    form = TransactionSplitInlineForm
+    formset = TransactionSplitFormSet
+    extra = 0
+    can_delete = False  # Enable deletion of split rows
+    fields = ("id", "user", "split_value", "amount")  # Removed split_method - it's now in the main form
+    autocomplete_fields = ("user",)
+    verbose_name = "Split"
+    verbose_name_plural = "Splits Among Friends"
+    classes = ('collapse',)
+    
+    class Media:
+        js = ('admin/js/split_calculator.js',) if False else ()  # Will be handled in template
+    
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Override to show all users in the user field for splits, even with autocomplete."""
+        
+        from dal import autocomplete
+        User = get_user_model()
+        if db_field.name == "user":
+            # Use .all() to bypass any default manager filtering that might restrict users
+            # Show all active, non-deleted users for splits
+            kwargs["queryset"] = User.objects.all().filter(is_active=True, is_deleted=False).order_by('email')
+            
+            # Explicitly set the autocomplete widget to use our custom UserAutocomplete view
+            # This bypasses Django Admin's default autocomplete which uses UserAdmin.get_search_results
+            kwargs["widget"] = autocomplete.ModelSelect2(
+                url="user-autocomplete",
+                attrs={
+                    "data-placeholder": "Search user by email...",
+                    "class": "user-autocomplete-no-buttons",
+                },
+            )
+        
+        # Get the formfield from parent
+        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        
+        # Ensure queryset is not restricted (needed for initial value display)
+        if db_field.name == "user":
+            formfield.queryset = User.objects.all().filter(is_active=True, is_deleted=False).order_by('email')
+        
+        return formfield
+
+
 # -----------------------------------
 # TRANSACTION ADMIN
 # -----------------------------------
@@ -207,8 +493,8 @@ class TransactionAdmin(RestrictedAdmin):
         "totals_match"
     )
     search_fields = ("store__name", "description", "category__name", "account__name", 
-                        "items__product__name", "items__product__preferred__name",  
-                        "items__product__brand__preferred__name", "items__product__brand__name")
+                    "items__product__name", "items__product__preferred__name",  
+                    "items__product__brand__preferred__name", "items__product__brand__name")
 
     list_filter = (
         ("date", DateRangeFilter),
@@ -229,7 +515,7 @@ class TransactionAdmin(RestrictedAdmin):
             "classes": ("collapse",),
         }),
         ("🔄 Transfers/Currency Exchange", {
-            "fields": ("linked_transaction", "fee", "exchange_rate_record_display", "exchange_rate_record"),
+            "fields": ("linked_transaction", "fee", "exchange_rate_record_display"),
             "classes": ("collapse",),
         }),
         ("📊 Computed / Status", {
@@ -242,9 +528,97 @@ class TransactionAdmin(RestrictedAdmin):
     readonly_fields = ("linked_transaction", "fee", "exchange_rate_record_display", "processed", "view_attachment",
                         "created_at", "modified_at", "total_from_items", "totals_match")
     autocomplete_fields = ("category", "account", "currency", "store", "attachment")
-    inlines = [TransactionItemInline]
+    inlines = [TransactionItemInline, TransactionSplitInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
     actions = ["edit_selected"]
+
+    def get_object(self, request, object_id, from_field=None):
+        """Override to allow fetching transactions with splits even if not in queryset."""
+        # First try the normal way (from queryset)
+        try:
+            obj = super().get_object(request, object_id, from_field)
+            return obj
+        except (Transaction.DoesNotExist, ValueError, AttributeError, PermissionDenied) as e:
+            # If not found in queryset, try to get it directly if user has permission
+            # This allows viewing transactions with splits even though they're not in the list
+            try:
+                # Try to get the object directly from the database
+                obj = Transaction.objects.get(pk=object_id, is_deleted=False)
+                # Check if user has permission to view this transaction
+                if self.has_view_permission(request, obj):
+                    return obj
+                else:
+                    # User doesn't have permission
+                    raise PermissionDenied
+            except Transaction.DoesNotExist:
+                # Transaction doesn't exist at all
+                pass
+            # Re-raise the original exception if we can't find it or user doesn't have permission
+            raise
+
+    def has_view_permission(self, request, obj=None):
+        """Allow viewing transactions where:
+        1. The user created the transaction, OR
+        2. The user has a split in the transaction
+        """
+        if request.user.is_superuser:
+            return True
+        
+        if obj is None:
+            # For list view, check queryset instead
+            return True
+        
+        # User can view if they created the transaction
+        if obj.created_by == request.user:
+            return True
+        
+        # User can view if they have a split in the transaction
+        if TransactionSplit.objects.filter(
+            transaction=obj,
+            user=request.user,
+            is_deleted=False
+        ).exists():
+            return True
+        
+        return False
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        """Override to allow viewing transactions with splits even if not in queryset."""
+        # For objects not in the queryset, we need to handle them specially
+        if object_id:
+            # First, try to get the object using our custom get_object
+            # This will handle transactions with splits even if not in queryset
+            try:
+                obj = self.get_object(request, object_id)
+                # Verify permission
+                if not self.has_view_permission(request, obj):
+                    raise PermissionDenied
+                # If we got here, the object exists and user has permission
+                # Now we need to temporarily modify the queryset to include this object
+                # so Django admin's changeform_view can work with it
+                original_get_queryset = self.get_queryset
+                def patched_get_queryset(req):
+                    qs = original_get_queryset(req)
+                    # Add this object to the queryset if it's not already there
+                    if not qs.filter(pk=obj.pk).exists():
+                        # Use union to add this object
+                        from django.db.models import Q
+                        return qs.model.objects.filter(
+                            Q(pk__in=qs.values_list('pk', flat=True)) | Q(pk=obj.pk)
+                        )
+                    return qs
+                self.get_queryset = patched_get_queryset
+                try:
+                    return super().changeform_view(request, object_id, form_url, extra_context)
+                finally:
+                    # Restore original method
+                    self.get_queryset = original_get_queryset
+            except (Transaction.DoesNotExist, ValueError, AttributeError, PermissionDenied):
+                # If we can't get the object or no permission, let Django handle the error
+                pass
+        
+        # Normal case - call parent
+        return super().changeform_view(request, object_id, form_url, extra_context)
 
     def edit_selected(self, request, queryset):
         """Bulk-edit selected transactions with DAL autocomplete support."""
@@ -374,6 +748,58 @@ class TransactionAdmin(RestrictedAdmin):
                 obj.save(update_fields=["fee"])
                 fee_tx.delete()
                 logger.info(f"[TransactionAdmin.save_model] Removed fee transaction {fee_tx.id} for {obj.id}")
+        
+        # Store split_method in all splits' notes
+        split_method = form.cleaned_data.get("split_method", "equally")
+        if split_method and obj.pk:
+            for split in obj.splits.filter(is_deleted=False):
+                if split.notes is None:
+                    split.notes = {}
+                elif not isinstance(split.notes, dict):
+                    split.notes = {}
+                split.notes['split_method'] = split_method
+                split.save(update_fields=['notes'])
+
+    def save_related(self, request, form, formsets, change):
+        """Override to handle split cleanup and validation."""
+        # Call parent to save all formsets first
+        super().save_related(request, form, formsets, change)
+        
+        # After saving, check if we should clean up splits
+        obj = form.instance
+        if obj and obj.pk:
+            # Get all non-deleted splits
+            splits = TransactionSplit.objects.filter(
+                transaction=obj,
+                is_deleted=False
+            )
+            
+            split_count = splits.count()
+            
+            # If there's only one split and it's the current user, delete it
+            if split_count == 1:
+                single_split = splits.first()
+                if single_split and single_split.user == request.user:
+                    logger.info(
+                        f"[TransactionAdmin.save_related] Only current user split exists, "
+                        f"deleting split {single_split.id} for transaction {obj.id}"
+                    )
+                    single_split.delete()
+                elif single_split:
+                    # Only one split but not current user - keep it
+                    logger.debug(
+                        f"[TransactionAdmin.save_related] Single split exists for user "
+                        f"{single_split.user.email}, keeping it"
+                    )
+            elif split_count == 0:
+                logger.debug(
+                    f"[TransactionAdmin.save_related] No splits exist for transaction {obj.id}"
+                )
+            else:
+                # Multiple splits exist - keep them all
+                logger.debug(
+                    f"[TransactionAdmin.save_related] {split_count} splits exist for transaction {obj.id}, keeping all"
+                )
 
     def changelist_view(self, request, extra_context=None):
         func_name = f"{self.__class__.__name__}.changelist_view"
@@ -678,9 +1104,8 @@ class TransactionAdmin(RestrictedAdmin):
             # ✅ Render a simple “View File” link
             filename = os.path.basename(url)
             return format_html('<a href="{}" target="_blank">📎 View File ({})</a>', url, filename)
-
     view_attachment.short_description = "Invoice"
-    
+
     def exchange_rate_record_display(self, obj):
         """Display exchange rate record with currency information."""
         if not obj or not obj.exchange_rate_record:
@@ -708,7 +1133,6 @@ class TransactionAdmin(RestrictedAdmin):
             )
         else:
             return str(exch)
-    
     exchange_rate_record_display.short_description = "Exchange Rate Record"
 
     def get_currency_from_account(self, request):
@@ -1080,6 +1504,35 @@ class TransactionAdmin(RestrictedAdmin):
         except Exception as e:
             logger.exception(f"[{func_name}] Error handling cross-currency transaction: {e}")
             # Don't fail the transaction save, just log the error
+
+
+# -----------------------------------
+# OWES ADMIN (Custom View)
+# -----------------------------------
+@admin.register(OwesDummyModel)
+class OwesAdmin(admin.ModelAdmin):
+    """Admin for the Owes summary view."""
+    
+    def has_add_permission(self, request):
+        """Disable add permission - this is a view-only admin."""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Disable change permission - this is a view-only admin."""
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        """Disable delete permission - this is a view-only admin."""
+        return False
+    
+    def has_view_permission(self, request, obj=None):
+        """Allow all authenticated users to view the owes summary."""
+        return request.user.is_authenticated
+    
+    def changelist_view(self, request, extra_context=None):
+        """Show the owes view directly."""
+        return _render_owes_view(request, self.admin_site, self.model._meta)
+
 
 # -----------------------------------
 # TRANSACTION ITEM ADMIN

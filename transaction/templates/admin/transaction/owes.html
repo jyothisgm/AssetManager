@@ -1,0 +1,177 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Owes Summary{% endblock %}
+
+{% block content %}
+{% if merged_data %}
+    <div style="margin: 20px 0; padding: 15px; border-radius: 5px;">
+        <strong>Summary:</strong> {{ merged_data|length }} user(s) with outstanding balances
+    </div>
+{% endif %}
+
+<div class="results">
+    <table id="result_list" class="table table-striped">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Net Balance</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for data in merged_data %}
+            <tr>
+                <td>
+                    <strong>{{ data.user.email }}</strong>
+                    {% if data.user.first_name or data.user.last_name %}
+                        <br><small>{{ data.user.first_name }} {{ data.user.last_name }}</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if data.net_currency_totals %}
+                        {% for currency, net_amount in data.net_currency_totals.items %}
+                            <div>
+                                {% if net_amount < 0 %}
+                                    <strong style="color: #dc3545;">{{ currency }}{{ net_amount|floatformat:2 }}</strong>
+                                    <small style="color: #6c757d;">(You owe)</small>
+                                {% elif net_amount > 0 %}
+                                    <strong style="color: #28a745;">{{ currency }}{{ net_amount|floatformat:2 }}</strong>
+                                    <small style="color: #6c757d;">(They owe you)</small>
+                                {% else %}
+                                    <span class="text-muted">{{ currency }}0.00</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">0.00</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <details>
+                        <summary>View Details</summary>
+                        <div style="margin-top: 10px;">
+                            {% for currency, details in data.net_currency_details.items %}
+                                <div style="margin-bottom: 15px;">
+                                    <strong>{{ currency }} Details:</strong>
+                                    
+                                    {% if details.owed_to %}
+                                        <div style="margin-top: 5px; margin-left: 10px;">
+                                            <strong style="color: #dc3545;">You owe them:</strong>
+                                            <table class="table table-sm" style="margin-top: 5px;">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Transaction</th>
+                                                        <th>Amount</th>
+                                                        <th>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for detail in details.owed_to %}
+                                                    <tr>
+                                                        <td>
+                                                            {% if detail.transaction %}
+                                                                <a href="{% url 'admin:transaction_transaction_change' detail.transaction.id %}">
+                                                                    {{ detail.transaction.get_transaction_type_display }}{% if detail.transaction.category.name or detail.transaction.store.name %} - {% if detail.transaction.category.name %}{{ detail.transaction.category.name }}{% endif %}{% if detail.transaction.category.name and detail.transaction.store.name %} {% endif %}{% if detail.transaction.store.name %}{{ detail.transaction.store.name }}{% endif %}{% endif %}
+                                                                </a>
+                                                            {% else %}
+                                                                N/A
+                                                            {% endif %}
+                                                        </td>
+                                                        <td>{{ currency }}{{ detail.amount|floatformat:2 }}</td>
+                                                        <td>
+                                                            {% if detail.date %}
+                                                                {{ detail.date|date:"Y-m-d H:i" }}
+                                                            {% else %}
+                                                                -
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    {% endif %}
+                                    
+                                    {% if details.owed_by %}
+                                        <div style="margin-top: 5px; margin-left: 10px;">
+                                            <strong style="color: #28a745;">They owe you:</strong>
+                                            <table class="table table-sm" style="margin-top: 5px;">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Transaction</th>
+                                                        <th>Amount</th>
+                                                        <th>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for detail in details.owed_by %}
+                                                    <tr>
+                                                        <td>
+                                                            {% if detail.transaction %}
+                                                                <a href="{% url 'admin:transaction_transaction_change' detail.transaction.id %}">
+                                                                    {{ detail.transaction.get_transaction_type_display }}{% if detail.transaction.category.name or detail.transaction.store.name %} - {% if detail.transaction.category.name %}{{ detail.transaction.category.name }}{% endif %}{% if detail.transaction.category.name and detail.transaction.store.name %} {% endif %}{% if detail.transaction.store.name %}{{ detail.transaction.store.name }}{% endif %}{% endif %}
+                                                                </a>
+                                                            {% else %}
+                                                                N/A
+                                                            {% endif %}
+                                                        </td>
+                                                        <td>{{ currency }}{{ detail.amount|floatformat:2 }}</td>
+                                                        <td>
+                                                            {% if detail.date %}
+                                                                {{ detail.date|date:"Y-m-d H:i" }}
+                                                            {% else %}
+                                                                -
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="3" class="text-center text-muted">
+                    No outstanding balances with other users.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<style>
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .table th, .table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+    }
+    .table th {
+        font-weight: bold;
+    }
+    .table-sm th, .table-sm td {
+        padding: 6px;
+        font-size: 0.9em;
+    }
+    .table tr:hover {
+    }
+    details {
+        cursor: pointer;
+    }
+    details summary {
+        color: #007bff;
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}

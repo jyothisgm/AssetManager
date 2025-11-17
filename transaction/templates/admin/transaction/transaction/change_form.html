@@ -3,8 +3,49 @@
 
 {% block extrahead %}
 {{ block.super }}
+<style>
+    /* Hide edit and view buttons for user autocomplete fields in splits */
+    /* Target links that are siblings of user select fields */
+    select[id*="splits-"][id*="user"] ~ a.related-lookup,
+    select[name*="splits-"][name*="user"] ~ a.related-lookup,
+    select[id*="splits-"][id*="user"] ~ a[href*="/admin/user/"],
+    select[name*="splits-"][name*="user"] ~ a[href*="/admin/user/"],
+    
+    /* Target links in table cells containing user selects */
+    tr[id*="splits-"] td:has(select[id*="user"]) a.related-lookup,
+    tr[id*="splits-"] td:has(select[id*="user"]) a[href*="/admin/user/"],
+    tr[id*="splits-"] td:has(select[id*="user"]) a[title*="edit"],
+    tr[id*="splits-"] td:has(select[id*="user"]) a[title*="view"],
+    tr[id*="splits-"] td:has(select[id*="user"]) a[title*="Edit"],
+    tr[id*="splits-"] td:has(select[id*="user"]) a[title*="View"],
+    
+    /* Target links after Select2 container for user fields */
+    .select2-container:has(+ a[href*="/admin/user/"]) + a,
+    .select2-container:has(+ a.related-lookup) + a {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    /* Hide buttons in related widget wrapper for splits user fields (fallback for browsers without :has) */
+    .related-widget-wrapper select[id*="splits-"][id*="user"] ~ a,
+    .related-widget-wrapper select[name*="splits-"][name*="user"] ~ a {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    /* Ensure delete buttons for splits are visible */
+    .split-delete-button,
+    a.split-delete-button,
+    td.delete .split-delete-button {
+        display: inline-block !important;
+        visibility: visible !important;
+        margin-left: 10px;
+    }
+</style>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Get current user ID from template context
+    const currentUserId = {% if current_user_id %}{{ current_user_id }}{% else %}null{% endif %};
     const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
     
     // Get exchange rate record data from the form
@@ -94,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function () {
         
         // Also check if the field is readonly (set by form when exchange_rate_record exists)
         const isReadonlyFromForm = transactionCurrencyAmountField && 
-                                   (transactionCurrencyAmountField.hasAttribute('readonly') || 
+                                    (transactionCurrencyAmountField.hasAttribute('readonly') || 
                                     transactionCurrencyAmountField.classList.contains('readonly'));
         
         // Use form data or readonly attribute to determine if record exists
@@ -421,4 +462,903 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 </script>
+{% endblock %}
+
+{% block after_related_objects %}
+{{ block.super }}
+<script>
+(function() {
+    // Wait for DOM to be ready and inlines to be loaded
+    function moveSplitMethodFieldset() {
+        const splitMethodFieldset = document.getElementById('split-method-fieldset');
+        if (!splitMethodFieldset) return;
+        
+        // Find the splits inline group - try multiple selectors
+        let splitsInline = null;
+        
+        // Try multiple ID patterns Django admin might use
+        // Django admin creates IDs like: <model_name>_set-group or <model_name>-group
+        splitsInline = document.getElementById('transactionsplit_set-group') || 
+                        document.getElementById('transactionsplit-group') ||
+                        document.querySelector('[id*="transactionsplit"][id*="group"]');
+        
+        // Try by class and heading text
+        if (!splitsInline) {
+            const allInlines = document.querySelectorAll('.inline-group, fieldset.module, .inline-related');
+            for (const inline of allInlines) {
+                const h2 = inline.querySelector('h2');
+                if (h2) {
+                    const text = h2.textContent || h2.innerText || '';
+                    if (text.includes('Splits Among Friends') || 
+                        text.includes('Split') || 
+                        (text.includes('Split') && text.includes('Friend'))) {
+                        splitsInline = inline;
+                            break;
+                        }
+                }
+            }
+        }
+        
+        // Last resort: find by looking for table with user/amount columns
+        if (!splitsInline) {
+            const tables = document.querySelectorAll('.inline-group table, fieldset.module table');
+            for (const table of tables) {
+                const headers = table.querySelectorAll('thead th');
+                let hasUser = false, hasAmount = false;
+                headers.forEach(th => {
+                    const text = (th.textContent || th.innerText || '').toLowerCase();
+                    if (text.includes('user')) hasUser = true;
+                    if (text.includes('amount')) hasAmount = true;
+                });
+                if (hasUser && hasAmount) {
+                    splitsInline = table.closest('.inline-group, fieldset.module');
+                                break;
+                }
+            }
+        }
+        
+        // Find the summary element with h2 id "splits-heading"
+        const splitsHeading = document.getElementById('splits-heading');
+        const summary = splitsHeading ? splitsHeading.closest('summary') : null;
+        
+        if (summary) {
+            // Remove from current location if it exists
+            if (splitMethodFieldset.parentNode) {
+                splitMethodFieldset.parentNode.removeChild(splitMethodFieldset);
+            }
+            
+            // Insert the fieldset right after the summary element
+            if (summary.nextSibling) {
+                summary.parentNode.insertBefore(splitMethodFieldset, summary.nextSibling);
+            } else {
+                summary.parentNode.appendChild(splitMethodFieldset);
+            }
+            
+            splitMethodFieldset.style.display = '';
+        } else if (splitsInline) {
+            // Fallback: if summary not found, try to find it within the inline group
+            const summaryInInline = splitsInline.querySelector('summary');
+            if (summaryInInline) {
+                if (splitMethodFieldset.parentNode) {
+                    splitMethodFieldset.parentNode.removeChild(splitMethodFieldset);
+                }
+                if (summaryInInline.nextSibling) {
+                    summaryInInline.parentNode.insertBefore(splitMethodFieldset, summaryInInline.nextSibling);
+                } else {
+                    summaryInInline.parentNode.appendChild(splitMethodFieldset);
+                }
+                splitMethodFieldset.style.display = '';
+            } else {
+                // Final fallback: just show it where it is
+                splitMethodFieldset.style.display = '';
+            }
+        } else {
+            // Fallback: just show it where it is
+            splitMethodFieldset.style.display = '';
+        }
+    }
+    
+    // Try multiple times to catch inlines that load asynchronously
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', moveSplitMethodFieldset);
+    } else {
+        moveSplitMethodFieldset();
+    }
+
+})();
+
+// Function to get transaction amount
+function getTransactionAmount() {
+    const amountField = document.getElementById('id_amount');
+    if (!amountField) return 0;
+    const amount = parseFloat(amountField.value) || 0;
+    return amount;
+}
+
+// Function to calculate amount for a specific row based on split method
+function calculateAmountForRow(row, splitMethod, transactionAmount) {
+    const valueField = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+    const amountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+    const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
+    if (!amountField || transactionAmount <= 0) return;
+    
+    let calculatedAmount = 0;
+    
+    if (splitMethod === 'equally') {
+        // Split equally among all friends
+        const splitCount = splitRows.length;
+        if (splitCount > 0) {
+            calculatedAmount = transactionAmount / splitCount;
+        }
+    } else if (splitMethod === 'percentage' && valueField) {
+        // Calculate from percentage: amount = transaction_amount * percentage / 100
+        const percentage = parseFloat(valueField.value) || 0;
+                if (percentage > 0 && percentage <= 100) {
+                    calculatedAmount = (transactionAmount * percentage) / 100;
+                }
+    } else if (splitMethod === 'shares' && valueField) {
+        // Calculate from shares: 
+        // 1. Calculate total shares from all valid rows
+        // 2. Amount per share = transaction_amount / total_shares
+        // 3. This person's amount = amount_per_share * user_shares
+        const userShares = parseFloat(valueField.value) || 0;
+        if (userShares > 0) {
+            // Calculate total shares from all valid rows (excluding deleted and empty forms)
+            let totalShares = 0;
+            splitRows.forEach(function(otherRow) {
+                const otherValueField = otherRow.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+                if (otherValueField) {
+                    const shares = parseFloat(otherValueField.value) || 0;
+                    if (shares > 0) {
+                        totalShares += shares;
+                    }
+                }
+            });
+            
+            // Calculate amount per share: total / sum of all shares
+            if (totalShares > 0) {
+                const amountPerShare = transactionAmount / totalShares;
+                // This person's amount = amount per share * their shares
+                calculatedAmount = amountPerShare * userShares;
+            }
+        }
+    } else if (splitMethod === 'unequally') {
+        // For unequally, amount is manually entered, don't calculate
+                return;
+            }
+            
+    // Update the amount field
+    if (calculatedAmount > 0) {
+        amountField.value = calculatedAmount.toFixed(2);
+        // Trigger change event
+        amountField.dispatchEvent(new Event('input', { bubbles: true }));
+        amountField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+
+// Function to recalculate all split amounts
+function recalculateAllSplitAmounts() {
+    const splitMethodField = document.getElementById('id_split_method');
+    if (!splitMethodField) return;
+    
+    const splitMethod = splitMethodField.value || 'equally';
+            const transactionAmount = getTransactionAmount();
+    
+            if (transactionAmount <= 0) return;
+    // Find all split rows (only those with IDs like splits-0, splits-1, etc.)
+    const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
+    console.log(splitRows);
+
+    // For shares method, we need to calculate total shares first, then calculate each amount
+    // For other methods, we can calculate independently
+    splitRows.forEach(function(row) {
+        calculateAmountForRow(row, splitMethod, transactionAmount);
+    });
+}
+
+// Function to update readonly state of value and amount fields based on split method
+function updateSplitFieldsReadonly() {
+    const splitMethodField = document.getElementById('id_split_method');
+    if (!splitMethodField) return;
+    
+    const splitMethod = splitMethodField.value || 'equally';
+    
+    // Find all split rows
+    const splitRows = document.querySelectorAll('tr[id*="transactionsplit"], tr[class*="form-row"], .inline-related');
+    
+    splitRows.forEach(function(row) {
+        // Skip empty forms and deleted rows
+        if (row.classList.contains('empty-form') || row.classList.contains('add-row')) return;
+        // Find value and amount fields in this row
+        const valueField = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+        const amountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+        
+        // Get row background color for styling readonly fields
+            const rowStyle = window.getComputedStyle(row);
+            const rowBgColor = rowStyle.backgroundColor;
+            
+        // Update value field readonly state
+        if (valueField) {
+            if (splitMethod === 'equally' || splitMethod === 'unequally') {
+                // Value readonly for equally and unequally
+                // Use readOnly instead of disabled so the value is still submitted
+                valueField.readOnly = true;
+                valueField.disabled = false; // Don't disable, just make readonly
+                valueField.style.backgroundColor = rowBgColor || 'transparent';
+                valueField.style.cursor = 'not-allowed';
+                } else {
+                // Value editable for percentage and shares
+                valueField.readOnly = false;
+                valueField.disabled = false;
+                valueField.style.backgroundColor = '';
+                valueField.style.cursor = '';
+            }
+        }
+        
+        // Update amount field readonly state
+        if (amountField) {
+            if (splitMethod === 'equally' || splitMethod === 'percentage' || splitMethod === 'shares') {
+                // Amount readonly for equally, percentage, and shares
+                // Use readOnly instead of disabled so the value is still submitted
+                amountField.readOnly = true;
+                amountField.disabled = false; // Don't disable, just make readonly
+                amountField.style.backgroundColor = rowBgColor || 'transparent';
+                amountField.style.cursor = 'not-allowed';
+                } else {
+                // Amount editable for unequally
+                amountField.readOnly = false;
+                amountField.disabled = false;
+                amountField.style.backgroundColor = '';
+                amountField.style.cursor = '';
+            }
+        }
+    });
+    
+    // After updating readonly state, recalculate amounts
+    recalculateAllSplitAmounts();
+}
+
+// Listen for changes to split method, value fields, transaction amount, and row changes
+document.addEventListener('DOMContentLoaded', function() {
+    const splitMethodField = document.getElementById('id_split_method');
+    const transactionAmountField = document.getElementById('id_amount');
+    
+    // Update on split method change
+    if (splitMethodField) {
+        splitMethodField.addEventListener('change', function() {
+            updateSplitFieldsReadonly();
+        });
+        
+        // Initial update
+        setTimeout(updateSplitFieldsReadonly, 100);
+    }
+    
+    // Update when transaction amount changes
+    if (transactionAmountField) {
+        transactionAmountField.addEventListener('input', function() {
+            setTimeout(recalculateAllSplitAmounts, 100);
+        });
+        transactionAmountField.addEventListener('change', function() {
+            setTimeout(recalculateAllSplitAmounts, 100);
+        });
+    }
+    
+    // Listen for value field changes (for percentage and shares)
+    document.addEventListener('input', function(e) {
+        if (e.target.matches('.split-value-input, input[id*="split_value"], input[name*="split_value"]')) {
+                const row = e.target.closest('tr, .form-row, .inline-related');
+                if (row) {
+                const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+                const transactionAmount = getTransactionAmount();
+                if (transactionAmount > 0 && (splitMethod === 'percentage' || splitMethod === 'shares')) {
+                    // Debounce the calculation
+                    clearTimeout(window.splitValueTimeout);
+                    window.splitValueTimeout = setTimeout(function() {
+                        calculateAmountForRow(row, splitMethod, transactionAmount);
+                        // For shares, recalculate all because total shares changed
+                        if (splitMethod === 'shares') {
+                            recalculateAllSplitAmounts();
+                            }
+                        }, 300);
+                    }
+                }
+            }
+    });
+    
+    // Listen for user selection changes (affects equally method)
+    document.addEventListener('change', function(e) {
+        if (e.target.matches('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]')) {
+            const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+            // Recalculate when user is selected or deselected (for equally and shares)
+            if (splitMethod === 'equally' || splitMethod === 'shares') {
+                setTimeout(recalculateAllSplitAmounts, 100);
+                // Also recalculate after a delay to ensure all changes are processed
+                setTimeout(recalculateAllSplitAmounts, 300);
+            }
+        }
+    
+    });
+    
+    // Listen for clicks on "Remove" link (inline-deletelink)
+    document.addEventListener('click', function(e) {
+        const removeLink = e.target.closest('a.inline-deletelink');
+        if (removeLink) {
+            // Check if this is in the splits inline
+            const row = removeLink.closest('tr[id*="splits-"]');
+            if (row) {
+                const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+                // Recalculate amounts when a row is removed (for equally and shares)
+                setTimeout(function() {
+                    updateSplitFieldsReadonly();
+                    if (splitMethod === 'equally' || splitMethod === 'shares') {
+                        recalculateAllSplitAmounts();
+                    }
+                }, 50);
+                setTimeout(function() {
+                    if (splitMethod === 'equally' || splitMethod === 'shares') {
+                        recalculateAllSplitAmounts();
+                    }
+                }, 200);
+                setTimeout(function() {
+                    if (splitMethod === 'equally' || splitMethod === 'shares') {
+                        recalculateAllSplitAmounts();
+                    }
+                }, 500);
+            }
+        }
+    });
+    
+    // Listen for clicks on "Add another Split" button
+    document.addEventListener('click', function(e) {
+        const addLink = e.target.closest('a.addlink, .add-row a, tr.add-row a');
+        if (addLink) {
+            const addRow = addLink.closest('tr.add-row, .add-row');
+            if (addRow) {
+                // Check if this is the splits add button by checking if it's in the splits inline
+                const splitsInline = document.getElementById('transactionsplit_set-group') || 
+                                    document.getElementById('transactionsplit-group') ||
+                                    document.querySelector('[id*="transactionsplit"][id*="group"]');
+                if (splitsInline && splitsInline.contains(addRow)) {
+                    const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+                    
+                    // Wait for the new row to be added, then recalculate
+                setTimeout(function() {
+                        updateSplitFieldsReadonly();
+                        if (splitMethod === 'equally' || splitMethod === 'shares') {
+                            recalculateAllSplitAmounts();
+                        }
+                }, 200);
+                        setTimeout(function() {
+                        updateSplitFieldsReadonly();
+                        if (splitMethod === 'equally' || splitMethod === 'shares') {
+                            recalculateAllSplitAmounts();
+                        }
+                    }, 500);
+                        setTimeout(function() {
+                        updateSplitFieldsReadonly();
+                        if (splitMethod === 'equally' || splitMethod === 'shares') {
+                            recalculateAllSplitAmounts();
+                        }
+                    }, 1000);
+                }
+            }
+        }
+    });
+    
+    // Also listen for new rows being added (formset:added event)
+    document.addEventListener('formset:added', function(event) {
+        const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+        
+        // Check if this is a splits formset addition
+        const addedRow = event.detail || event.target;
+        if (addedRow && (addedRow.id && addedRow.id.includes('splits-') || 
+            (addedRow.querySelector && addedRow.querySelector('input[id*="splits-"]')))) {
+            
+            // Use the autoPopulateFirstRow function which already handles duplicate checking
+            // This will be called after a delay to ensure the DOM is ready
+        }
+        
+        // Auto-populate first row if needed
+        setTimeout(autoPopulateFirstRow, 100);
+        setTimeout(autoPopulateFirstRow, 500);
+        
+        // Update readonly state first
+        setTimeout(function() {
+            updateSplitFieldsReadonly();
+        }, 100);
+        // Recalculate amounts when new rows are added (for equally and shares)
+        // Use multiple delays to catch when user is selected
+        setTimeout(function() {
+            if (splitMethod === 'equally' || splitMethod === 'shares') {
+                recalculateAllSplitAmounts();
+            }
+        }, 200);
+        setTimeout(function() {
+            if (splitMethod === 'equally' || splitMethod === 'shares') {
+                recalculateAllSplitAmounts();
+            }
+        }, 500);
+        setTimeout(function() {
+            if (splitMethod === 'equally' || splitMethod === 'shares') {
+                recalculateAllSplitAmounts();
+            }
+        }, 1000);
+    });
+    
+    // Watch for DOM changes in the splits section (including row removal)
+    const splitsInline = document.getElementById('transactionsplit_set-group') || 
+                        document.getElementById('transactionsplit-group') ||
+                        document.querySelector('[id*="transactionsplit"][id*="group"]');
+    if (splitsInline) {
+        const observer = new MutationObserver(function(mutations) {
+            let shouldRecalculate = false;
+            let rowRemoved = false;
+            
+            mutations.forEach(function(mutation) {
+                // Check if nodes were removed (row deletion)
+                if (mutation.removedNodes.length > 0) {
+                    mutation.removedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) { // Element node
+                            const rowId = node.id || '';
+                            // Check if a valid split row was removed (not empty form)
+                            if (rowId.match(/splits-(\d+)/) && !rowId.includes('empty')) {
+                                rowRemoved = true;
+                                shouldRecalculate = true;
+                            }
+                        }
+                    });
+                }
+                // Check if nodes were added (row addition)
+                if (mutation.addedNodes.length > 0) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) { // Element node
+                            const rowId = node.id || '';
+                            // Check if a valid split row was added
+                            if (rowId.match(/splits-(\d+)/) && !rowId.includes('empty')) {
+                                shouldRecalculate = true;
+                            }
+                            // Also check children for rows
+                            const childRows = node.querySelectorAll ? node.querySelectorAll('tr[id*="splits-"]') : [];
+                            childRows.forEach(function(childRow) {
+                                const childRowId = childRow.id || '';
+                                if (childRowId.match(/splits-(\d+)/) && !childRowId.includes('empty')) {
+                                    shouldRecalculate = true;
+                        }
+                    });
+                }
+            });
+                }
+        });
+        
+            if (shouldRecalculate) {
+                const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
+                // Use shorter delay for immediate feedback
+                setTimeout(function() {
+                    updateSplitFieldsReadonly();
+                    if (splitMethod === 'equally' || splitMethod === 'shares') {
+                        recalculateAllSplitAmounts();
+                    }
+                }, 50);
+                // Also recalculate after delays to ensure DOM is fully updated
+                    setTimeout(function() {
+                    if (splitMethod === 'equally' || splitMethod === 'shares') {
+                        recalculateAllSplitAmounts();
+                                }
+                }, 200);
+                if (rowRemoved) {
+                        setTimeout(function() {
+                        if (splitMethod === 'equally' || splitMethod === 'shares') {
+                            recalculateAllSplitAmounts();
+                            }
+                        }, 300);
+                    }
+                        } else {
+                // Just update readonly state for other changes
+                        setTimeout(function() {
+                    updateSplitFieldsReadonly();
+                        }, 100);
+            }
+        });
+        observer.observe(splitsInline, {
+            childList: true,
+            subtree: true
+        });
+    }
+    
+    // Hide edit and view buttons for user autocomplete fields in splits
+    function hideUserAutocompleteButtons() {
+        // Find all user select fields in splits
+        const userSelects = document.querySelectorAll('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+        userSelects.forEach(function(select) {
+            // Find parent related widget wrapper
+            const wrapper = select.closest('.related-widget-wrapper');
+            if (wrapper) {
+                // Hide all links in the wrapper
+                const links = wrapper.querySelectorAll('a');
+                links.forEach(function(link) {
+                    // Check if it's an edit/view button (not the select2 dropdown)
+                    if (link.href && (link.href.includes('user') || link.href.includes('/admin/') || link.classList.contains('related-lookup'))) {
+                        // Skip if it's inside select2 container
+                        if (!link.closest('.select2-container')) {
+                            link.style.display = 'none';
+                            link.style.visibility = 'hidden';
+                        }
+                    }
+                });
+            }
+            
+            // Also check siblings after the select element
+            let nextSibling = select.nextElementSibling;
+            while (nextSibling) {
+                if (nextSibling.tagName === 'A') {
+                    nextSibling.style.display = 'none';
+                    nextSibling.style.visibility = 'hidden';
+                }
+                nextSibling = nextSibling.nextElementSibling;
+            }
+            
+            // Check for Select2 container and hide buttons after it
+            const select2Container = select.nextElementSibling;
+            if (select2Container && select2Container.classList.contains('select2-container')) {
+                let nextAfterSelect2 = select2Container.nextElementSibling;
+                while (nextAfterSelect2) {
+                    if (nextAfterSelect2.tagName === 'A') {
+                        nextAfterSelect2.style.display = 'none';
+                        nextAfterSelect2.style.visibility = 'hidden';
+                    }
+                    nextAfterSelect2 = nextAfterSelect2.nextElementSibling;
+                }
+            }
+            
+            // Find the table row and hide all user-related links
+            const row = select.closest('tr');
+            if (row) {
+                const rowLinks = row.querySelectorAll('a[href*="user"], a.related-lookup');
+                rowLinks.forEach(function(link) {
+                    // Skip links inside select2
+                    if (!link.closest('.select2-container') && !link.closest('.select2-dropdown')) {
+                        link.style.display = 'none';
+                        link.style.visibility = 'hidden';
+                        }
+                    });
+                }
+            });
+    }
+    
+    // Hide buttons on page load (multiple attempts to catch delayed rendering)
+    hideUserAutocompleteButtons();
+    setTimeout(hideUserAutocompleteButtons, 100);
+    setTimeout(hideUserAutocompleteButtons, 500);
+    setTimeout(hideUserAutocompleteButtons, 1000);
+    setTimeout(hideUserAutocompleteButtons, 2000);
+    
+    // Hide buttons when Select2 is initialized (DAL uses Select2)
+    if (window.jQuery && window.jQuery.fn.select2) {
+        $(document).on('select2:open', function(e) {
+            setTimeout(hideUserAutocompleteButtons, 50);
+        });
+    }
+    
+    // Hide buttons when new rows are added
+    const splitsInlineForButtons = document.getElementById('transactionsplit_set-group') || 
+                                   document.getElementById('transactionsplit-group') ||
+                                   document.querySelector('[id*="transactionsplit"][id*="group"]');
+    if (splitsInlineForButtons) {
+        const buttonObserver = new MutationObserver(function(mutations) {
+            hideUserAutocompleteButtons();
+        });
+        buttonObserver.observe(splitsInlineForButtons, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style']
+        });
+    }
+    
+    // Also hide buttons when formset rows are added
+    document.addEventListener('formset:added', function(event) {
+        setTimeout(hideUserAutocompleteButtons, 100);
+        setTimeout(hideUserAutocompleteButtons, 500);
+    });
+    
+    // Before form submission, ensure all amount fields are enabled (not disabled)
+    // This ensures their values are submitted even if they were accidentally disabled
+    const form = document.querySelector('form#transaction_form, form[method="post"]');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            // Find all amount fields in splits and ensure they're not disabled
+            const amountFields = document.querySelectorAll('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            amountFields.forEach(function(field) {
+                if (field.disabled) {
+                    field.disabled = false;
+                }
+            });
+            
+            // Also ensure value fields are not disabled
+            const valueFields = document.querySelectorAll('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+            valueFields.forEach(function(field) {
+                if (field.disabled) {
+                    field.disabled = false;
+                }
+            });
+        });
+    }
+    
+    // Watch for dynamically added elements
+    if (window.MutationObserver) {
+        const globalObserver = new MutationObserver(function(mutations) {
+            let shouldHide = false;
+            mutations.forEach(function(mutation) {
+                if (mutation.addedNodes.length > 0) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) {
+                            // Check if it's a user select or related widget wrapper
+                            if (node.matches && (node.matches('select[id*="splits-"][id*="user"]') || 
+                                node.matches('.related-widget-wrapper') ||
+                                node.querySelector('select[id*="splits-"][id*="user"]'))) {
+                                shouldHide = true;
+                            }
+                }
+            });
+        }
+            });
+            if (shouldHide) {
+                setTimeout(hideUserAutocompleteButtons, 100);
+            }
+        });
+        globalObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+    
+    // Function to auto-populate first row with current user if no user is selected
+    function autoPopulateFirstRow() {
+        if (!currentUserId) return;
+        
+        const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
+        if (splitRows.length === 0) return;
+        
+        // Check if current user is already selected in any row
+        let currentUserAlreadySelected = false;
+        let hasUserSelected = false;
+        splitRows.forEach(function(row) {
+            if (row.classList.contains('empty-form') || row.classList.contains('add-row')) return;
+            const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+            if (userSelect && userSelect.value) {
+                hasUserSelected = true;
+                // Check if this is the current user
+                if (userSelect.value == currentUserId) {
+                    currentUserAlreadySelected = true;
+                }
+            }
+        });
+        
+        // Only auto-populate if:
+        // 1. No user is selected in any row, OR
+        // 2. Current user is not already selected (to prevent duplicates)
+        if (!hasUserSelected || !currentUserAlreadySelected) {
+            // Find the first empty row (no user selected)
+            for (let i = 0; i < splitRows.length; i++) {
+                const row = splitRows[i];
+                if (row.classList.contains('empty-form') || row.classList.contains('add-row')) continue;
+                
+                const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                if (userSelect && !userSelect.value) {
+                    // Check if current user is already in another row
+                    let userExistsInOtherRow = false;
+                    splitRows.forEach(function(otherRow) {
+                        if (otherRow === row) return;
+                        if (otherRow.classList.contains('empty-form') || otherRow.classList.contains('add-row')) return;
+                        const otherUserSelect = otherRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                        if (otherUserSelect && otherUserSelect.value == currentUserId) {
+                            userExistsInOtherRow = true;
+                        }
+                    });
+                    
+                    // Only populate if current user doesn't exist in another row
+                    if (!userExistsInOtherRow) {
+                        // Set the current user in this row
+                        const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+                        if ($ && $.fn.select2 && $(userSelect).data('select2')) {
+                            $(userSelect).val(currentUserId).trigger('change');
+                        } else {
+                            userSelect.value = currentUserId;
+                            userSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    break; // Only populate the first empty row
+                }
+            }
+        }
+    }
+    
+    // Add delete buttons to split rows
+    function addDeleteButtonsToSplits() {
+        const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
+        console.log(splitRows);
+        splitRows.forEach(function(row) {
+            // Skip if delete button already exists
+            if (row.querySelector('.split-delete-button')) {
+                return;
+            }
+            // Skip empty forms
+            if (row.classList.contains('empty-form') || row.classList.contains('add-row')) {
+                    return;
+                }
+            let splitId = null;
+            
+            // Find the split ID - look for input with name pattern like "splits-0-id" or "splits-1-id"
+            // This is the actual TransactionSplit ID, not the transaction ID
+            const rowId = row.id || '';
+            const rowMatch = rowId.match(/splits-(\d+)/);
+            if (rowMatch) {
+                const formIndex = rowMatch[1];
+                // Look for input with name like "splits-0-id" where 0 is the form index
+                // This is the TransactionSplit's ID field
+                const idInput = row.querySelector(`input[name="splits-${formIndex}-id"], input[id="id_splits-${formIndex}-id"]`);
+                if (idInput && idInput.value && idInput.value.trim() !== '') {
+                    // Verify it's a UUID (TransactionSplit uses UUID primary key)
+                    const value = idInput.value.trim();
+                    splitId = value;
+                }
+            }
+            
+            // Fallback: try to find any input with name/id pattern matching splits-X-id (not transaction-id)
+            if (!splitId) {
+                const idInputs = row.querySelectorAll('input[type="hidden"][name*="splits-"][name*="-id"], input[type="hidden"][id*="splits-"][id*="-id"]');
+                for (let input of idInputs) {
+                    // Make sure it's not the transaction ID - check the name pattern
+                    const name = input.name || '';
+                    const id = input.id || '';
+                    // Should match pattern like "splits-0-id" not "transaction-id" or similar
+                    if ((name.match(/splits-\d+-id/) || id.match(/splits-\d+-id/)) && input.value && input.value.trim() !== '') {
+                        const value = input.value.trim();
+                        if (value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+                            splitId = value;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Only add button if we have a valid split ID (existing splits)
+            if (splitId) {
+                // Find the last visible cell (not the delete column which is hidden)
+                const cells = Array.from(row.querySelectorAll('td')).filter(cell => {
+                    // Skip the delete column (it's hidden via CSS)
+                    return !cell.classList.contains('delete');
+                });
+                
+                // Use the last visible cell, or the last cell if no visible cells found
+                let targetCell = cells.length > 0 ? cells[cells.length - 1] : null;
+                
+                // If no target cell found, get the last cell anyway (fallback)
+                if (!targetCell) {
+                    const allCells = row.querySelectorAll('td');
+                    targetCell = allCells.length > 0 ? allCells[allCells.length - 1] : null;
+                }
+                
+                // If still no target cell, create one
+                if (!targetCell) {
+                    targetCell = document.createElement('td');
+                    row.appendChild(targetCell);
+                }
+                
+                // Check if button already exists in this cell
+                if (!targetCell.querySelector('.split-delete-button')) {
+                    const deleteButton = document.createElement('a');
+                    deleteButton.href = `/admin/transaction/transactionsplit/${splitId}/delete/`;
+                    deleteButton.className = 'split-delete-button deletelink';
+                    deleteButton.textContent = 'Delete';
+                    deleteButton.title = 'Delete this split';
+                    deleteButton.style.marginLeft = '10px';
+                    deleteButton.style.display = 'inline-block';
+                    deleteButton.style.visibility = 'visible';
+                    deleteButton.style.opacity = '1';
+                    
+                    // Add button to cell - append to existing content or create container
+                    let container = targetCell.querySelector('div');
+                    if (!container) {
+                        container = document.createElement('div');
+                        targetCell.appendChild(container);
+                    }
+                    container.appendChild(deleteButton);
+                    
+                    // Debug log (can be removed later)
+                    console.log('[addDeleteButtonsToSplits] Added delete button for split:', splitId, 'in row:', row.id);
+                }
+            } else {
+                // Debug: log when we can't find an ID
+                console.log('[addDeleteButtonsToSplits] Could not find split ID for row:', row.id, 'Inputs found:', row.querySelectorAll('input[type="hidden"]').length);
+            }
+        });
+    }
+    
+    // Add delete buttons on page load with multiple attempts
+    function runAddDeleteButtons() {
+        addDeleteButtonsToSplits();
+    }
+    
+    runAddDeleteButtons();
+    setTimeout(runAddDeleteButtons, 100);
+    setTimeout(runAddDeleteButtons, 300);
+    setTimeout(runAddDeleteButtons, 500);
+    setTimeout(runAddDeleteButtons, 1000);
+    
+    // Auto-populate first row on page load
+    setTimeout(autoPopulateFirstRow, 100);
+    setTimeout(autoPopulateFirstRow, 500);
+    setTimeout(autoPopulateFirstRow, 1000);
+    setTimeout(runAddDeleteButtons, 2000);
+    
+    // Add delete buttons when formset rows are added
+    document.addEventListener('formset:added', function(event) {
+        setTimeout(runAddDeleteButtons, 50);
+        setTimeout(runAddDeleteButtons, 200);
+        setTimeout(runAddDeleteButtons, 500);
+    });
+    
+    // Watch for changes to split rows
+    const splitsInlineForDeleteButtons = document.getElementById('transactionsplit_set-group') || 
+                                        document.getElementById('transactionsplit-group') ||
+                                        document.querySelector('[id*="transactionsplit"][id*="group"]');
+    if (splitsInlineForDeleteButtons) {
+        const deleteButtonObserver = new MutationObserver(function(mutations) {
+            // Only run if there are actual changes
+            let hasChanges = false;
+            mutations.forEach(function(mutation) {
+                if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
+                    hasChanges = true;
+                }
+            });
+            if (hasChanges) {
+                setTimeout(runAddDeleteButtons, 100);
+            }
+        });
+        deleteButtonObserver.observe(splitsInlineForDeleteButtons, {
+            childList: true,
+            subtree: true,
+            attributes: false
+        });
+    }
+    
+    // Also watch the entire document for split rows being added
+    if (window.MutationObserver) {
+        const globalDeleteObserver = new MutationObserver(function(mutations) {
+            let shouldRun = false;
+            mutations.forEach(function(mutation) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) {
+                        if (node.matches && (node.matches('tr[id*="splits-"]') || node.querySelector('tr[id*="splits-"]'))) {
+                            shouldRun = true;
+                        }
+                    }
+                });
+            });
+            if (shouldRun) {
+                setTimeout(runAddDeleteButtons, 200);
+            }
+        });
+        globalDeleteObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+});
+</script>
+<fieldset class="module aligned" id="split-method-fieldset" style="display: none;">
+    <div class="flex-container form-row field-split_method">
+        <label for="{{ adminform.form.split_method.id_for_label }}" {% if adminform.form.split_method.field.required %}class="required"{% endif %}>
+            {{ adminform.form.split_method.label }}:
+        </label>
+        {{ adminform.form.split_method }}
+        {% if adminform.form.split_method.help_text %}
+            <p class="help">{{ adminform.form.split_method.help_text }}</p>
+        {% endif %}
+        {% if adminform.form.split_method.errors %}
+            <ul class="errorlist">{{ adminform.form.split_method.errors }}</ul>
+        {% endif %}
+    </div>
+</fieldset>
 {% endblock %}

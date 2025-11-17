@@ -27,6 +27,7 @@ urlpatterns = [
     path("catalog/", include("catalog.urls")),
     path("common/", include("common.urls")),
     path("account/", include("account.urls")),
+    path("user/", include("user.urls")),
 ]
 
 if settings.DEBUG:

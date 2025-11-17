@@ -1,0 +1,2222 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    /* Hide edit and view buttons for user autocomplete fields in splits */
+    .user-autocomplete-no-buttons + .select2-container ~ a,
+    .user-autocomplete-no-buttons + .select2-container .select2-selection__clear + a,
+    .select2-container .select2-selection__clear + a[href*="user"],
+    .select2-container ~ a[href*="user"] {
+        display: none !important;
+    }
+    /* Alternative selector for DAL buttons */
+    .select2-container[data-field-name*="user"] ~ a,
+    .select2-container[data-field-name*="user"] + a,
+    tr[id*="splits"] .select2-container ~ a,
+    tr[id*="splits"] a[href*="user"] {
+        display: none !important;
+    }
+    /* Override Select2 disabled background color - keep it default */
+    .select2-container--default.select2-container--disabled .select2-selection--single {
+        background-color: transparent !important;
+        background: none !important;
+    }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+    
+    // Get exchange rate record data from the form
+    // Check if instance has exchange_rate_record (form sets initial values when it exists)
+    {% if original and original.exchange_rate_record %}
+    const hasExchangeRateRecordFromForm = true;
+    // Calculate transaction currency amount from exchange rate record directly
+    // transaction_amount = account_amount / exchange_rate
+    // exchange_rate is: X account_currency = transaction_currency
+    {% if original.amount and original.exchange_rate_record.provider_rate %}
+    const transactionCurrencyAmountInitial = {{ original.amount|floatformat:2 }} / {{ original.exchange_rate_record.provider_rate }};
+    {% else %}
+    const transactionCurrencyAmountInitial = null;
+    {% endif %}
+    const exchangeRateInitial = {% if original.exchange_rate_record.provider_rate %}{{ original.exchange_rate_record.provider_rate }}{% else %}null{% endif %};
+    // Get transaction currency code from exchange rate record (quote_currency)
+    // This is the actual transaction currency, not the account currency
+    const transactionCurrencyCodeFromExchange = {% if original.exchange_rate_record.quote_currency.code %}"{{ original.exchange_rate_record.quote_currency.code }}"{% else %}null{% endif %};
+    {% else %}
+    const transactionCurrencyAmountInitial = null;
+    const exchangeRateInitial = null;
+    const hasExchangeRateRecordFromForm = false;
+    const transactionCurrencyCodeFromExchange = null;
+    {% endif %}
+
+    // --- Cached DOM elements ---
+    const txType        = document.getElementById('id_transaction_type');
+    const accountSel    = document.getElementById('id_account');
+    const toAccountSel  = document.getElementById('id_to_account');
+    const storeSel      = document.getElementById('id_store');
+    const currencySel   = document.getElementById('id_currency');
+    const categorySel   = document.getElementById('id_category');
+    const feeField      = document.getElementById('id_fee_amount');
+    const toAmountField = document.getElementById('id_to_amount');
+    const transactionCurrencyAmountField = document.getElementById('id_transaction_currency_amount');
+    const exchangeRateField = document.getElementById('id_exchange_rate');
+    const amountField = document.getElementById('id_amount');
+    const splitMethodField = document.getElementById('id_split_method');  // Main split method selector
+
+    // Labels
+    const accountLabel  = document.querySelector("label[for='id_account']");
+    const toAccountLabel= document.querySelector("label[for='id_to_account']");
+    const amountLabel   = document.querySelector("label[for='id_amount']");
+    const feeLabel      = document.querySelector("label[for='id_fee_amount']");
+    const toAmountLabel = document.querySelector("label[for='id_to_amount']");
+    const transactionCurrencyAmountLabel = document.querySelector("label[for='id_transaction_currency_amount']");
+
+    // Field containers
+    const feeRow        = feeField ? feeField.closest('.form-row, .form-group, .field-box') : null;
+    const toAccountRow  = toAccountSel ? toAccountSel.closest('.form-row, .form-group, .field-box') : null;
+    const toAmountRow   = toAmountField ? toAmountField.closest('.form-row, .form-group, .field-box') : null;
+    const transactionCurrencyAmountRow = transactionCurrencyAmountField ? transactionCurrencyAmountField.closest('.form-row, .form-group, .field-box') : null;
+    const exchangeRateRow = exchangeRateField ? exchangeRateField.closest('.form-row, .form-group, .field-box') : null;
+
+    // --- State ---
+    let fromCurrency = null;
+    let toCurrency   = null;
+    let accountCurrency = null;
+
+    /* ============================
+        Utility helpers
+    ============================ */
+    function fetchJSON(url, cb) {
+        fetch(url)
+            .then(r => (r.ok ? r.json() : Promise.reject()))
+            .then(d => cb(d))
+            .catch(() => cb({}));
+    }
+
+    function fetchCurrency(accountId, cb) {
+        if (!accountId) return cb(null);
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency/?account_id=${accountId}`, data => {
+            cb(data.currency_name || null);
+        });
+    }
+
+    function fetchCurrencyCode(currencyId, cb) {
+        if (!currencyId) return cb(null);
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency-code/?currency_id=${currencyId}`, data => {
+            cb(data.currency_code || null);
+        });
+    }
+
+    function checkCrossCurrencyFields() {
+        // Check if exchange rate record exists from form data
+        // The form sets transaction_currency_amount initial value when exchange_rate_record exists
+        let hasRecord = hasExchangeRateRecordFromForm;
+        
+        // Also check if the field is readonly (set by form when exchange_rate_record exists)
+        const isReadonlyFromForm = transactionCurrencyAmountField && 
+                                    (transactionCurrencyAmountField.hasAttribute('readonly') || 
+                                    transactionCurrencyAmountField.classList.contains('readonly'));
+        
+        // Use form data or readonly attribute to determine if record exists
+        const hasExchangeRateRecord = hasRecord || isReadonlyFromForm;
+        
+        // Check if transaction currency differs from account currency
+        const currencyId = currencySel?.value;
+        if (!currencyId || !accountCurrency) {
+            // Hide fields if no currency selected or no account currency
+            if (transactionCurrencyAmountRow) transactionCurrencyAmountRow.style.display = 'none';
+            if (exchangeRateRow) exchangeRateRow.style.display = 'none';
+            // Make amount field editable if not cross-currency
+            if (amountField) {
+                amountField.removeAttribute('readonly');
+                amountField.classList.remove('readonly');
+                amountField.placeholder = '';
+            }
+            return;
+        }
+        
+        // Fetch transaction currency code
+        fetchCurrencyCode(currencyId, transactionCurrency => {
+            const isCrossCurrency = accountCurrency && transactionCurrency && accountCurrency !== transactionCurrency;
+            
+            // Show transaction currency amount field ONLY if exchange rate record exists
+            if (transactionCurrencyAmountRow) {
+                transactionCurrencyAmountRow.style.display = hasExchangeRateRecord ? '' : 'none';
+            }
+            
+            // Show exchange rate field if cross-currency
+            if (exchangeRateRow) {
+                exchangeRateRow.style.display = isCrossCurrency ? '' : 'none';
+            }
+            // Transaction currency amount field is readonly (calculated from account amount / exchange rate)
+            if (hasExchangeRateRecord && transactionCurrencyAmountField) {
+                // Transaction currency amount is readonly when exchange rate record exists
+                transactionCurrencyAmountField.setAttribute('readonly', 'readonly');
+                transactionCurrencyAmountField.classList.add('readonly');
+                // Update label to include transaction currency code from exchange rate record
+                // (transaction currency is changed to account currency after exchange rate record is created)
+                if (transactionCurrencyAmountLabel) {
+                    if (transactionCurrencyCodeFromExchange) {
+                        transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrencyCodeFromExchange}):`;
+                    } else if (transactionCurrency) {
+                        transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrency}):`;
+                    }
+                }
+                // Calculate it from account amount and exchange rate
+                calculateTransactionCurrencyAmount();
+            } else if (transactionCurrencyAmountField) {
+                // No exchange rate record, make sure it's not readonly (though it should be hidden)
+                transactionCurrencyAmountField.removeAttribute('readonly');
+                transactionCurrencyAmountField.classList.remove('readonly');
+                // Reset label
+                if (transactionCurrencyAmountLabel) {
+                    transactionCurrencyAmountLabel.textContent = 'Transaction amount:';
+                }
+            }
+            if (!isCrossCurrency && amountField) {
+                // Not cross-currency, make sure amount is editable
+                amountField.removeAttribute('readonly');
+                amountField.classList.remove('readonly');
+                amountField.placeholder = '';
+            }
+        });
+    }
+
+    function setSelectValue(selectEl, value, text) {
+        if (!selectEl || !value) return;
+        if ($ && $(selectEl).data('select2')) {
+            if (!$(selectEl).find(`option[value='${value}']`).length) {
+                const newOption = new Option(text || value, value, true, true);
+                $(selectEl).append(newOption).trigger('change');
+            } else {
+                $(selectEl).val(String(value)).trigger('change');
+            }
+        } else {
+            selectEl.value = String(value);
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    /* ============================
+        Core label/field logic
+    ============================ */
+    function toggleTransferFields() {
+        const val = (txType?.value || "").toLowerCase();
+        const isTransfer = val.includes('transfer');
+        const isDebit  = val === 'transfer_debit';
+        const isCredit = val === 'transfer_credit';
+
+        // Always show fee field, hide to_amount and to_account for non-transfers
+        if (feeRow) feeRow.style.display = '';
+        if (toAccountRow) toAccountRow.style.display = isTransfer ? '' : 'none';
+        // toAmountRow visibility will be controlled by checkCurrencyDifference() for transfers
+        if (!isTransfer && toAmountRow) toAmountRow.style.display = 'none';
+
+        // Reset labels
+        if (accountLabel) accountLabel.textContent = "Account:";
+        if (amountLabel) amountLabel.textContent  = "Amount:";
+        if (feeLabel) feeLabel.textContent = "Fee amount:";
+
+        if (!isTransfer) {
+            // For non-transfers, fee is always visible with simple label
+            return;
+        }
+
+        // Mirror labels for debit/credit
+        if (isDebit) {
+            accountLabel.textContent  = "From account:";
+            toAccountLabel.textContent = "To account:";
+        } else if (isCredit) {
+            accountLabel.textContent  = "To account:";
+            toAccountLabel.textContent = "From account:";
+        }
+
+        checkCurrencyDifference();
+    }
+
+    function checkCurrencyDifference() {
+        const val = (txType?.value || "").toLowerCase();
+        const isTransfer = val.includes('transfer');
+        const isDebit  = val === 'transfer_debit';
+        const isCredit = val === 'transfer_credit';
+        
+        // Fee field is always visible, but update labels for transfers
+        if (!isTransfer) {
+            if (feeLabel) feeLabel.textContent = "Fee amount:";
+            return;
+        }
+
+        if (fromCurrency && toCurrency && fromCurrency !== toCurrency) {
+            // Cross-currency transfer - show to_amount field with currency-specific labels
+            if (toAmountRow) toAmountRow.style.display = '';
+            if (isDebit) {
+                if (amountLabel) amountLabel.textContent = fromCurrency ? `Sent Amount (excl. fees)(${fromCurrency})` : 'Sent Amount (excl. fees)';
+                if (feeLabel) feeLabel.textContent = fromCurrency ? `Fee Amount (${fromCurrency}):` : 'Fee Amount:';
+                if (toAmountLabel) toAmountLabel.textContent = toCurrency ? `Received Amount (${toCurrency}):` : 'Received Amount:';
+            } else if (isCredit) {
+                if (amountLabel) amountLabel.textContent = fromCurrency ? `Received Amount (${fromCurrency})` : 'Received Amount';
+                if (feeLabel) feeLabel.textContent = toCurrency ? `Fee Amount (${toCurrency}):` : 'Fee Amount:';
+                if (toAmountLabel) toAmountLabel.textContent = toCurrency ? `Sent Amount (excl. fees)(${toCurrency}):` : 'Sent Amount (excl. fees):';
+            }
+        } else {
+            // Same currency transfer - hide to_amount field and use simple labels
+            if (toAmountRow) toAmountRow.style.display = 'none';
+            const currency = fromCurrency || toCurrency;
+            if (isDebit) {
+                if (amountLabel) amountLabel.textContent = currency ? `Amount (${currency}):` : 'Amount:';
+                if (feeLabel) feeLabel.textContent = currency ? `Fee Amount (${currency}):` : 'Fee Amount:';
+            } else if (isCredit) {
+                if (amountLabel) amountLabel.textContent = currency ? `Amount (${currency}):` : 'Amount:';
+                if (feeLabel) feeLabel.textContent = currency ? `Fee Amount (${currency}):` : 'Fee Amount:';
+            }
+        }
+    }
+
+    /* ============================
+        Event bindings
+    ============================ */
+    function bindSelectEvents(el, onChange) {
+        if (!el) return;
+        el.addEventListener('change', e => onChange(e.target.value));
+        if ($) $(el).on('select2:select', e => onChange(e.params.data?.id || el.value));
+    }
+
+    // Bind account events
+    bindSelectEvents(accountSel, id => {
+        fetchCurrency(id, code => { 
+            fromCurrency = code;
+            accountCurrency = code;
+            checkCurrencyDifference();
+            checkCrossCurrencyFields();
+        });
+    });
+    bindSelectEvents(toAccountSel, id => {
+        fetchCurrency(id, code => { toCurrency = code; checkCurrencyDifference(); });
+    });
+    
+    // Bind currency selector to check cross-currency
+    bindSelectEvents(currencySel, () => {
+        checkCrossCurrencyFields();
+    });
+    
+    // Update transaction currency amount label when currency changes
+    function updateTransactionCurrencyAmountLabel() {
+        if (!transactionCurrencyAmountLabel || !hasExchangeRateRecordFromForm) return;
+        
+        // If we have the currency code from the exchange rate record, use that
+        // (because after exchange rate record is created, transaction currency is changed to account currency)
+        if (transactionCurrencyCodeFromExchange) {
+            transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrencyCodeFromExchange}):`;
+            return;
+        }
+        
+        // Fallback: try to get from currency selector
+        const currencyId = currencySel?.value;
+        if (currencyId) {
+            fetchCurrencyCode(currencyId, transactionCurrency => {
+                if (transactionCurrency && transactionCurrencyAmountLabel) {
+                    transactionCurrencyAmountLabel.textContent = `Transaction amount (${transactionCurrency}):`;
+                }
+            });
+        }
+    }
+    
+    // Bind currency change to update label
+    if (currencySel) {
+        currencySel.addEventListener('change', updateTransactionCurrencyAmountLabel);
+    }
+    
+    // Calculate transaction currency amount from account amount and exchange rate
+    // This is calculated in Python (backend), but we update it in real-time when fields change
+    function calculateTransactionCurrencyAmount() {
+        if (!transactionCurrencyAmountField || !amountField) return;
+        
+        // Only calculate if transaction_currency_amount is readonly (exchange rate record exists)
+        const isReadonly = transactionCurrencyAmountField.hasAttribute('readonly') || 
+                            transactionCurrencyAmountField.classList.contains('readonly');
+        if (!isReadonly) {
+            return;
+        }
+        
+        const accountAmount = parseFloat(amountField.value);
+        
+        // Get exchange rate from the Exchange Rate field (this is the source of truth)
+        let exchangeRate = null;
+        if (exchangeRateField && exchangeRateField.value) {
+            exchangeRate = parseFloat(exchangeRateField.value);
+        }
+        
+        // If exchange rate field is empty, try to use the initial value from form
+        if ((!exchangeRate || exchangeRate === 0 || isNaN(exchangeRate)) && hasExchangeRateRecordFromForm && exchangeRateInitial) {
+            exchangeRate = parseFloat(exchangeRateInitial);
+        }
+        
+        // Calculate transaction amount using the exchange rate from the Exchange Rate field
+        if (accountAmount && accountAmount > 0 && exchangeRate && exchangeRate > 0 && !isNaN(exchangeRate)) {
+            // Calculate: transaction_amount = account_amount / exchange_rate
+            // Exchange rate is: X account_currency = transaction_currency
+            // So: transaction_amount = account_amount / X
+            const calculatedTransactionAmount = (accountAmount / exchangeRate).toFixed(2);
+            transactionCurrencyAmountField.value = calculatedTransactionAmount;
+        } else if (hasExchangeRateRecordFromForm && transactionCurrencyAmountInitial) {
+            // Fallback: use the initial value calculated by Python backend
+            transactionCurrencyAmountField.value = parseFloat(transactionCurrencyAmountInitial).toFixed(2);
+        }
+    }
+    
+    // Bind events to recalculate transaction currency amount when account amount or exchange rate changes
+    // This provides real-time updates, but the initial calculation is done in Python
+    if (amountField) {
+        amountField.addEventListener('input', calculateTransactionCurrencyAmount);
+        amountField.addEventListener('blur', calculateTransactionCurrencyAmount);
+    }
+    if (exchangeRateField) {
+        exchangeRateField.addEventListener('input', calculateTransactionCurrencyAmount);
+        exchangeRateField.addEventListener('blur', calculateTransactionCurrencyAmount);
+        exchangeRateField.addEventListener('change', calculateTransactionCurrencyAmount);
+    }
+
+    // Bind store/category autofill
+    bindSelectEvents(storeSel, id => {
+        fetchJSON(`/admin/transaction/transaction/ajax/get-category/?store_id=${id}`, data => {
+            if (data.category_id) setSelectValue(categorySel, data.category_id, data.category_name);
+        });
+    });
+
+    // Bind account→currency autofill
+    bindSelectEvents(accountSel, id => {
+        fetchJSON(`/admin/transaction/transaction/ajax/get-currency/?account_id=${id}`, data => {
+            if (data.currency_id) setSelectValue(currencySel, data.currency_id, data.currency_name);
+        });
+    });
+
+    // Transaction type change
+    txType?.addEventListener('change', toggleTransferFields);
+
+    /* ============================
+        Initial load setup
+    ============================ */
+    const initialAccountId  = accountSel?.value;
+    const initialToAccountId = toAccountSel?.value;
+    if (initialAccountId)
+        fetchCurrency(initialAccountId, code => { 
+            fromCurrency = code;
+            accountCurrency = code;
+            checkCurrencyDifference();
+            checkCrossCurrencyFields();
+        });
+    if (initialToAccountId)
+        fetchCurrency(initialToAccountId, code => { toCurrency = code; checkCurrencyDifference(); });
+
+    toggleTransferFields();
+    checkCrossCurrencyFields();
+    
+    // Initial calculation on page load if exchange rate record exists
+    // Update label with currency code first
+    if (hasExchangeRateRecordFromForm) {
+        updateTransactionCurrencyAmountLabel();
+    }
+
+    // Wait a bit for all fields to be ready, then set the value
+    if (hasExchangeRateRecordFromForm) {
+        setTimeout(() => {
+            if (transactionCurrencyAmountField) {
+                // First, try to get value from data attribute (set by Python)
+                let initialValue = transactionCurrencyAmountField.getAttribute('data-initial-value');
+                if (!initialValue && transactionCurrencyAmountInitial !== null && transactionCurrencyAmountInitial !== undefined) {
+                    initialValue = transactionCurrencyAmountInitial;
+                }
+                // If we have an initial value, set it
+                if (initialValue) {
+                    const value = parseFloat(initialValue);
+                    if (!isNaN(value)) {
+                        transactionCurrencyAmountField.value = value.toFixed(2);
+                        console.log(`[TransactionForm] Set transaction currency amount: ${value.toFixed(2)}`);
+                    }
+                }
+                // Then recalculate to ensure it's in sync with current field values
+                calculateTransactionCurrencyAmount();
+            }
+        }, 300);
+    }
+
+    /* ============================
+        Transaction Split Auto-Fill Logic
+    ============================ */
+    
+    // Define current user variables FIRST, before any functions that use them
+    const currentUserEmail = '{{ request.user.email|escapejs }}';
+    let currentUserId = {{ request.user.id|default:"null" }};
+    
+    // Try to find current user ID from the form if not available
+    function findCurrentUserId() {
+        if (currentUserId) {
+            return currentUserId;
+        }
+        
+        // Look for current user in any user select field
+        const userSelects = document.querySelectorAll('select[id*="-user"], select[id*="user"]');
+        
+        for (const select of userSelects) {
+            // Try Select2 first
+            const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            if ($ && $(select).data('select2')) {
+                const select2Data = $(select).select2('data');
+                if (select2Data && select2Data.length > 0) {
+                    for (const item of select2Data) {
+                        if (item.text && item.text.includes(currentUserEmail)) {
+                            currentUserId = item.id;
+                            return currentUserId;
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: check option text
+            const options = select.querySelectorAll('option');
+            for (const option of options) {
+                if (option.textContent && option.textContent.includes(currentUserEmail)) {
+                    currentUserId = option.value;
+                    return currentUserId;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    function setupSplitAutoFill() {
+        const amountField = document.getElementById('id_amount');
+        if (!amountField) {
+            console.log('[SplitAutoFill] Amount field not found');
+            return;
+        }
+        
+        console.log('[SplitAutoFill] Initialized for user:', currentUserEmail, 'ID:', currentUserId);
+        
+        function calculateRemainderSplit() {
+            const transactionAmount = parseFloat(amountField.value) || 0;
+            console.log('[SplitAutoFill] Calculating remainder, transaction amount:', transactionAmount);
+            
+            if (transactionAmount <= 0) {
+                console.log('[SplitAutoFill] Transaction amount is 0 or invalid, skipping');
+                return;
+            }
+            
+            // Find current user ID if not already found
+            const userId = findCurrentUserId();
+            if (!userId) {
+                console.warn('[SplitAutoFill] Cannot calculate remainder: current user ID not found');
+                return;
+            }
+            
+                // Find all split rows - try multiple selectors for Django admin inline structure
+                // Django admin creates IDs like: transactionsplit_set-group (lowercase with underscores)
+                let splitGroup = document.querySelector('#transactionsplit_set-group');
+                
+                // Try alternative ID formats
+                if (!splitGroup) {
+                    splitGroup = document.querySelector('#transactionsplit-group');
+                }
+                if (!splitGroup) {
+                    splitGroup = document.querySelector('#transaction_split_set-group');
+                }
+                
+                // Try finding by class and checking for TransactionSplit fields
+                if (!splitGroup) {
+                    const allInlineGroups = document.querySelectorAll('.inline-group');
+                    console.log('[SplitAutoFill] Found', allInlineGroups.length, 'inline groups, searching for TransactionSplit...');
+                    for (const group of allInlineGroups) {
+                        // Log what's in each group for debugging
+                        const groupId = group.id || 'no-id';
+                        const groupTitle = group.querySelector('h2, h3, .inline-group-title')?.textContent || 'no-title';
+                        console.log('[SplitAutoFill] Checking inline group:', groupId, 'Title:', groupTitle);
+                        
+                        // Check if this group contains TransactionSplit fields (using "splits" prefix from related_name)
+                        const hasSplitField = group.querySelector('select[name*="splits-"], input[name*="splits-"], select[id*="splits-"], input[id*="splits-"]');
+                        if (hasSplitField) {
+                            splitGroup = group;
+                            console.log('[SplitAutoFill] Found TransactionSplit group by field search');
+                            break;
+                        }
+                        
+                        // Also check for any fields that might be split-related (user + amount pattern)
+                        const allSelects = group.querySelectorAll('select');
+                        const allInputs = group.querySelectorAll('input[type="text"], input[type="number"]');
+                        console.log('[SplitAutoFill] Group has', allSelects.length, 'selects and', allInputs.length, 'inputs');
+                        
+                        // Check if this looks like a split group (has user select and amount input)
+                        let hasUserField = false;
+                        let hasAmountField = false;
+                        for (const sel of allSelects) {
+                            if (sel.name && (sel.name.includes('user') || sel.id && sel.id.includes('user'))) {
+                                hasUserField = true;
+                                console.log('[SplitAutoFill] Found user field:', sel.name || sel.id);
+                            }
+                        }
+                        for (const inp of allInputs) {
+                            if (inp.name && (inp.name.includes('amount') || inp.id && inp.id.includes('amount'))) {
+                                hasAmountField = true;
+                                console.log('[SplitAutoFill] Found amount field:', inp.name || inp.id);
+                            }
+                        }
+                        
+                        // If it has both user and amount fields, it might be the split group
+                        if (hasUserField && hasAmountField) {
+                            // Check if it's NOT the items group (items have product, quantity, price)
+                            const hasProductField = group.querySelector('select[name*="product"], input[name*="product"]');
+                            if (!hasProductField) {
+                                splitGroup = group;
+                                console.log('[SplitAutoFill] Found potential split group by user+amount pattern');
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Last resort: search entire document for TransactionSplit fields and find parent group
+                if (!splitGroup) {
+                    const anySplitField = document.querySelector('select[name*="splits-"], input[name*="splits-"]');
+                    if (anySplitField) {
+                        // Find the parent inline group
+                        let parent = anySplitField.closest('.inline-group');
+                        if (!parent) {
+                            parent = anySplitField.closest('fieldset');
+                        }
+                        if (parent) {
+                            splitGroup = parent;
+                            console.log('[SplitAutoFill] Found TransactionSplit group by field parent');
+                        }
+                    }
+                }
+                
+                if (!splitGroup) {
+                    console.log('[SplitAutoFill] Split group not found - TransactionSplit inline may not be present');
+                    return;
+                }
+                
+                console.log('[SplitAutoFill] Found split group:', splitGroup.id || splitGroup.className);
+                
+                // Find all rows with form fields - ONLY rows that contain TransactionSplit fields
+                const allRows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                    // Only include rows that have TransactionSplit fields (name/id contains "splits-" from related_name)
+                    const hasSplitField = row.querySelector('select[name*="splits-"], input[name*="splits-"], select[id*="splits-"], input[id*="splits-"]');
+                    return !!hasSplitField;
+                });
+                console.log('[SplitAutoFill] Found', allRows.length, 'TransactionSplit rows');
+            
+            let totalSplits = 0;
+            let hasRemainderRow = false;
+            let remainderRow = null;
+            const filledRows = [];
+            
+            allRows.forEach((row, index) => {
+                // Only look for TransactionSplit fields (using "splits-" prefix)
+                const amountInput = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                const deleteCheckbox = row.querySelector('input[id*="splits-"][id*="DELETE"], input[name*="splits-"][name*="DELETE"]');
+                
+                // Skip deleted rows or header rows
+                if (deleteCheckbox && deleteCheckbox.checked) return;
+                if (!amountInput && !userSelect) return; // Not a TransactionSplit form row
+                
+                const amount = parseFloat(amountInput?.value) || 0;
+                let rowUserId = userSelect?.value;
+                
+                // For Select2 widgets, get value from Select2 instance
+                if (userSelect && $ && $(userSelect).data('select2')) {
+                    const select2Val = $(userSelect).val();
+                    if (select2Val) {
+                        rowUserId = String(select2Val);
+                    }
+                }
+                
+                // Check if this is the remainder row (assigned to current user)
+                if (rowUserId && (String(rowUserId) === String(userId) || 
+                    (userSelect && userSelect.options[userSelect.selectedIndex]?.text?.includes(currentUserEmail)))) {
+                    hasRemainderRow = true;
+                    remainderRow = row;
+                    console.log('[SplitAutoFill] Found remainder row at index', index);
+                }
+                
+                // Count amounts where user is selected
+                if (rowUserId && amount > 0) {
+                    totalSplits += amount;
+                    filledRows.push({ row, userId: rowUserId, amount });
+                }
+            });
+            
+            const remainder = transactionAmount - totalSplits;
+            const tolerance = 0.01;
+            
+            console.log('[SplitAutoFill] Total splits:', totalSplits, 'Remainder:', remainder, 'Has remainder row:', hasRemainderRow);
+            
+            // Don't auto-fill remainder split for current user - just log it
+            if (remainder > tolerance) {
+                console.log('[SplitAutoFill] Remainder amount:', remainder.toFixed(2), '- User can manually add this split if needed');
+                // Removed auto-fill logic - user must manually add the remainder split
+                return;
+            } else {
+                console.log('[SplitAutoFill] Splits are balanced (within tolerance)');
+            }
+        }
+        
+        // Monitor transaction amount changes
+        if (amountField) {
+            amountField.addEventListener('input', function() {
+                setTimeout(calculateRemainderSplit, 200);
+            });
+            amountField.addEventListener('change', function() {
+                setTimeout(calculateRemainderSplit, 200);
+            });
+        }
+        
+        // Monitor split amount and user field changes using event delegation
+        const splitGroupContainer = document.querySelector('#transactionsplit_set-group');
+        if (splitGroupContainer) {
+            // Listen for amount input changes
+            splitGroupContainer.addEventListener('input', function(e) {
+                if (e.target && e.target.matches('input[id*="-amount"], input[name*="-amount"]')) {
+                    console.log('[SplitAutoFill] Amount changed:', e.target.value);
+                    setTimeout(calculateRemainderSplit, 200);
+                }
+            });
+            
+            // Listen for user select changes (including Select2)
+            if ($) {
+                $(splitGroupContainer).on('select2:select select2:clear change', 'select[id*="-user"], select[name*="-user"]', function() {
+                    console.log('[SplitAutoFill] User selection changed');
+                    setTimeout(calculateRemainderSplit, 200);
+                });
+            }
+            
+            splitGroupContainer.addEventListener('change', function(e) {
+                if (e.target && e.target.matches('select[id*="-user"], select[name*="-user"]')) {
+                    console.log('[SplitAutoFill] User select changed:', e.target.value);
+                    setTimeout(calculateRemainderSplit, 200);
+                }
+            });
+        }
+        
+        // Calculate on page load (after everything is initialized)
+        setTimeout(() => {
+            console.log('[SplitAutoFill] Running initial calculation...');
+            findCurrentUserId();
+            calculateRemainderSplit();
+        }, 1000);
+    }
+
+    // Setup split auto-fill after DOM is ready
+    setupSplitAutoFill();
+
+    /* ============================
+        Split Calculator Logic (Shares/Percentage/Amount)
+    ============================ */
+    // Global function to initialize all rows - defined outside setupSplitCalculator
+    function initializeAllSplitRows() {
+        const splitGroup = document.querySelector('#splits-group, .inline-group');
+        if (splitGroup) {
+            const rows = splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related');
+            rows.forEach(row => {
+                // Check if this is a valid split row (has user or amount field)
+                const hasUserField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                const hasAmountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                if (hasUserField || hasAmountField) {
+                    updateRowVisibility(row);
+                }
+            });
+        }
+    }
+    
+    function setupSplitCalculator() {
+        const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+        const amountField = document.getElementById('id_amount');
+        
+        // Run initialization immediately
+        initializeAllSplitRows();
+        
+        if (!amountField) {
+            // Still set up event listeners even without amount field
+            setTimeout(initializeAllSplitRows, 500);
+            return;
+        }
+        function getTransactionAmount() {
+            return parseFloat(amountField.value) || 0;
+        }
+        function calculateSplitAmount(row) {
+            // Get method from main form field, not individual row
+            const method = getCurrentSplitMethod();
+            const splitValueInput = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+            const amountInput = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            if (!amountInput) return;
+            const transactionAmount = getTransactionAmount();
+            if (transactionAmount <= 0) return;
+            let calculatedAmount = 0;
+            
+            if (method === 'equally') {
+                // Equally: divide transaction amount equally among all non-deleted splits
+                const splitGroup = row.closest('.inline-group, #splits-group, fieldset');
+                let validSplitCount = 0;
+                if (splitGroup) {
+                    splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related').forEach(splitRow => {
+                        const deleteCheckbox = splitRow.querySelector('input[id*="DELETE"], input[name*="DELETE"]');
+                        const userSelect = splitRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                        if (!deleteCheckbox || !deleteCheckbox.checked) {
+                            if (userSelect && userSelect.value) {
+                                validSplitCount++;
+                            }
+                        }
+                    });
+                }
+                if (validSplitCount > 0) {
+                    calculatedAmount = transactionAmount / validSplitCount;
+                }
+            } else if (method === 'shares' && splitValueInput) {
+                const shares = parseFloat(splitValueInput.value) || 0;
+                if (shares > 0) {
+                    // Get total shares from all rows using shares method
+                    const splitGroup = row.closest('.inline-group, #splits-group, fieldset');
+                    let totalShares = 0;
+                    if (splitGroup) {
+                        splitGroup.querySelectorAll('.split-value-input, input[id*="split_value"], input[name*="split_value"]').forEach(input => {
+                            const inputRow = input.closest('tr');
+                            const rowMethodSelect = inputRow ? inputRow.querySelector('.split-method-select, select[id*="split_method"], select[name*="split_method"]') : null;
+                            if (rowMethodSelect && rowMethodSelect.value === 'shares') {
+                                const deleteCheckbox = inputRow ? inputRow.querySelector('input[id*="DELETE"], input[name*="DELETE"]') : null;
+                                const val = parseFloat(input.value) || 0;
+                                if (val > 0 && (!deleteCheckbox || !deleteCheckbox.checked)) {
+                                    totalShares += val;
+                                }
+                            }
+                        });
+                    }
+                    
+                    if (totalShares > 0) {
+                        calculatedAmount = (transactionAmount * shares) / totalShares;
+                    }
+                }
+            } else if (method === 'percentage' && splitValueInput) {
+                const percentage = parseFloat(splitValueInput.value) || 0;
+                if (percentage > 0 && percentage <= 100) {
+                    calculatedAmount = (transactionAmount * percentage) / 100;
+                }
+            } else if (method === 'unequally') {
+                // Unequally: user enters amount directly, no calculation
+                // Keep existing amount if set, otherwise return
+                return;
+            }
+            
+            // Always update amount when calculated (even if 0, to clear it)
+            amountInput.value = calculatedAmount.toFixed(2);
+            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+            amountInput.dispatchEvent(new Event('change', { bubbles: true }));
+            if ($) $(amountInput).trigger('input').trigger('change');
+        }
+
+        function updateRowVisibility(row) {
+            // Get method from main form field, not individual row
+            const method = getCurrentSplitMethod();
+            const splitValueInput = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+            const amountInput = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            
+            // Get the row's background color
+            const rowStyle = window.getComputedStyle(row);
+            const rowBgColor = rowStyle.backgroundColor;
+            
+            // Update placeholder and label based on method
+            if (splitValueInput) {
+                if (method === 'shares') {
+                    splitValueInput.placeholder = 'e.g., 2';
+                    splitValueInput.removeAttribute('max');
+                    splitValueInput.disabled = false;
+                    splitValueInput.readOnly = false;
+                    splitValueInput.style.backgroundColor = '';
+                    splitValueInput.style.cursor = '';
+                } else if (method === 'percentage') {
+                    splitValueInput.placeholder = 'e.g., 25.5';
+                    splitValueInput.setAttribute('max', '100');
+                    splitValueInput.disabled = false;
+                    splitValueInput.readOnly = false;
+                    splitValueInput.style.backgroundColor = '';
+                    splitValueInput.style.cursor = '';
+                } else {
+                    // Method is 'equally' or 'unequally' - no split_value needed
+                    splitValueInput.placeholder = 'Not used';
+                    splitValueInput.disabled = true;
+                    splitValueInput.readOnly = true;
+                    // Use row's background color instead of gray
+                    splitValueInput.style.backgroundColor = rowBgColor || 'transparent';
+                    splitValueInput.style.cursor = 'not-allowed';
+                }
+            }
+            
+            // Amount field: disabled when using equally, shares, or percentage (auto-calculated)
+            if (amountInput) {
+                amountInput.disabled = (method === 'equally' || method === 'shares' || method === 'percentage');
+                // Add visual indicator that it's auto-calculated
+                if (method === 'equally' || method === 'shares' || method === 'percentage') {
+                    // Use row's background color instead of gray
+                    amountInput.style.backgroundColor = rowBgColor || 'transparent';
+                    amountInput.style.cursor = 'not-allowed';
+                } else {
+                    // Method is 'unequally' - user can edit amount
+                    amountInput.style.backgroundColor = '';
+                    amountInput.style.cursor = '';
+                }
+            }
+        }
+        
+        function updateAllColumnVisibility() {
+            // The split_value column should always be visible (just disabled when method is 'amount')
+            // No need to hide/show the column anymore
+        }
+        function recalculateAllSplits() {
+            const splitGroup = document.querySelector('#splits-group, .inline-group');
+            if (!splitGroup) return;
+            
+            const method = getCurrentSplitMethod();
+            const rows = splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related');
+            // Recalculate all splits that need calculation (equally, shares, percentage)
+            rows.forEach(row => {
+                if (method === 'equally' || method === 'shares' || method === 'percentage') {
+                    calculateSplitAmount(row);
+                }
+            });
+        }
+        // Function to add a new split row immediately via manual cloning
+        function addNewSplitRowAjax(userId, amount, callback) {
+            console.log('[AddNewRow] Starting to add new row for user:', userId, 'amount:', amount);
+            
+            // Use findSplitGroup to ensure we get the correct splits group, not items group
+            const splitGroup = findSplitGroup();
+            if (!splitGroup) {
+                console.error('[AddNewRow] Split group not found');
+                if (callback) callback(null);
+                return;
+            }
+            
+            console.log('[AddNewRow] Found split group:', splitGroup.id || splitGroup.className);
+            
+            // Use manual cloning for immediate results (no delays)
+            console.log('[AddNewRow] Using manual clone for immediate row addition');
+            
+            // Find the formset management form - look for splits-specific TOTAL_FORMS
+            let totalFormsInput = splitGroup.querySelector('input[name*="splits-"][name*="TOTAL_FORMS"]');
+            if (!totalFormsInput) {
+                totalFormsInput = splitGroup.querySelector('input[id*="splits-"][id*="TOTAL_FORMS"]');
+            }
+            if (!totalFormsInput) {
+                // Fallback to any TOTAL_FORMS in this group
+                totalFormsInput = splitGroup.querySelector('input[name*="TOTAL_FORMS"], input[id*="TOTAL_FORMS"]');
+            }
+            if (!totalFormsInput) {
+                console.error('[AddNewRow] TOTAL_FORMS input not found in split group');
+                if (callback) callback(null);
+                return;
+            }
+            
+            // Get current form count
+            const currentFormCount = parseInt(totalFormsInput.value) || 0;
+            const newFormIndex = currentFormCount;
+            console.log('[AddNewRow] Current form count:', currentFormCount, 'New index:', newFormIndex);
+            
+            // Get the empty form template - make sure it's from splits, not items
+            let emptyForm = splitGroup.querySelector('.empty-form');
+            // Verify it's actually a splits empty form by checking for splits fields
+            if (emptyForm) {
+                const hasSplitsField = emptyForm.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                     emptyForm.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                if (!hasSplitsField) {
+                    console.error('[AddNewRow] Empty form found but it\'s not a splits form (has items fields instead)');
+                    emptyForm = null;
+                }
+            }
+            
+            if (!emptyForm) {
+                console.error('[AddNewRow] Empty form template not found or wrong type');
+                if (callback) callback(null);
+                return;
+            }
+            
+            console.log('[AddNewRow] Found correct empty form template');
+            
+            // Clone the empty form
+            const newRow = emptyForm.cloneNode(true);
+            newRow.classList.remove('empty-form');
+            newRow.id = emptyForm.id.replace('__prefix__', newFormIndex);
+            
+            // Update all field names and IDs in the new row
+            const allInputs = newRow.querySelectorAll('input, select, textarea, label');
+            allInputs.forEach(function(input) {
+                if (input.id) {
+                    input.id = input.id.replace('__prefix__', newFormIndex);
+                }
+                if (input.name) {
+                    input.name = input.name.replace('__prefix__', newFormIndex);
+                }
+                if (input.getAttribute('for')) {
+                    input.setAttribute('for', input.getAttribute('for').replace('__prefix__', newFormIndex));
+                }
+            });
+            
+            // Update the form count
+            totalFormsInput.value = currentFormCount + 1;
+            
+            // Insert the new row before the empty form
+            const tbody = splitGroup.querySelector('tbody');
+            if (tbody) {
+                tbody.insertBefore(newRow, emptyForm);
+            } else {
+                // If no tbody, insert after the last row
+                const lastRow = splitGroup.querySelector('tbody tr:last-child, .form-row:last-child');
+                if (lastRow) {
+                    lastRow.parentNode.insertBefore(newRow, lastRow.nextSibling);
+                } else {
+                    splitGroup.appendChild(newRow);
+                }
+            }
+            
+            // Make the row visible
+            newRow.style.display = '';
+            if (newRow.classList.contains('form-row')) {
+                newRow.classList.remove('empty-form');
+            }
+            
+            // Verify the cloned row has splits fields (not items fields)
+            const hasSplitsFields = newRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                   newRow.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            if (!hasSplitsFields) {
+                console.error('[AddNewRow] Cloned row does not have splits fields - it has items fields instead!');
+                console.error('[AddNewRow] Row HTML:', newRow.innerHTML.substring(0, 300));
+                if (callback) callback(null);
+                return;
+            }
+            
+            console.log('[AddNewRow] Cloned row verified - has splits fields');
+            
+            // Initialize Select2 and other widgets for the new row
+            if ($) {
+                // Initialize Select2 for autocomplete fields
+                const userSelect = newRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                if (userSelect) {
+                    // Check if it's a Select2 field
+                    if ($(userSelect).hasClass('admin-autocomplete') || $(userSelect).data('autocomplete-light-function')) {
+                        // Destroy existing Select2 if any
+                        if ($(userSelect).data('select2')) {
+                            $(userSelect).select2('destroy');
+                        }
+                        // Reinitialize Select2 - Django autocomplete light should handle this
+                        // But we'll trigger the initialization manually
+                        if (typeof django !== 'undefined' && django.jQuery && django.jQuery.fn.select2) {
+                            // Let Django autocomplete light initialize it
+                            setTimeout(function() {
+                                // Trigger autocomplete initialization
+                                if (window.autocomplete_light) {
+                                    window.autocomplete_light.initialize();
+                                }
+                            }, 50);
+                        }
+                    }
+                }
+                
+                // Initialize other form widgets if needed
+                django.jQuery(newRow).find('input, select, textarea').each(function() {
+                    // Trigger any initialization needed
+                    $(this).trigger('formset:added');
+                });
+            }
+            
+            // Trigger formset:added event for compatibility
+            if (window.dispatchEvent) {
+                const event = new CustomEvent('formset:added', {
+                    detail: { row: newRow }
+                });
+                window.dispatchEvent(event);
+            }
+            
+            // Also trigger Django's inline formset event if available
+            if ($ && $.Event) {
+                $(newRow).trigger($.Event('formset:added'));
+            }
+            
+            // Call callback immediately with the new row
+            if (callback) {
+                    callback(newRow);
+            }
+        }
+        
+        // Function to auto-add current user split with percentage
+        function autoAddCurrentUserSplit() {
+            const splitGroup = document.querySelector('#splits-group, .inline-group');
+            if (!splitGroup) return;
+            
+            const amountField = document.getElementById('id_amount');
+            if (!amountField) return;
+            const transactionAmount = parseFloat(amountField.value) || 0;
+            if (transactionAmount <= 0) return;
+            
+            // Get current user ID (already defined in template)
+            const userId = findCurrentUserId();
+            if (!userId) {
+                console.log('[AutoAddCurrentUser] Current user ID not found, skipping');
+                return;
+            }
+            
+            // Find all split rows - only rows that have split fields (not items or other inlines)
+            // First, get all potential rows
+            const allRows = splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related');
+            // Filter to only rows that have split-specific fields
+            const rows = Array.from(allRows).filter(row => {
+                // Check if this row has a split user field
+                const hasSplitUserField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                // Or check if it has split amount field
+                const hasSplitAmountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                // Exclude empty-form rows and add-row buttons
+                const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                return (hasSplitUserField || hasSplitAmountField) && isNotEmptyForm;
+            });
+            
+            console.log('[AutoAddCurrentUser] Found', rows.length, 'split rows (filtered from', allRows.length, 'total rows)');
+            
+            let totalOtherPercentage = 0;
+            let currentUserRow = null;
+            let hasOtherUserSplits = false;
+            
+            const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            
+            rows.forEach((row, index) => {
+                const deleteCheckbox = row.querySelector('input[id*="DELETE"]');
+                if (deleteCheckbox && deleteCheckbox.checked) {
+                    console.log('[AutoAddCurrentUser] Row', index, 'is marked for deletion, skipping');
+                    return; // Skip deleted rows
+                }
+                
+                // Debug: log what's in this row
+                console.log('[AutoAddCurrentUser] Row', index, 'HTML classes:', row.className);
+                console.log('[AutoAddCurrentUser] Row', index, 'Row ID:', row.id);
+                
+                // Try multiple selectors to find the user select field
+                let userSelect = row.querySelector('select[id*="splits-"][id*="user"]');
+                if (!userSelect) {
+                    userSelect = row.querySelector('select[name*="splits-"][name*="user"]');
+                }
+                if (!userSelect) {
+                    userSelect = row.querySelector('select[id*="user"]');
+                }
+                if (!userSelect) {
+                    userSelect = row.querySelector('select[name*="user"]');
+                }
+                
+                // Debug: log all selects in this row
+                const allSelects = row.querySelectorAll('select');
+                console.log('[AutoAddCurrentUser] Row', index, 'has', allSelects.length, 'select elements');
+                allSelects.forEach((sel, selIdx) => {
+                    console.log('[AutoAddCurrentUser] Row', index, 'Select', selIdx, 'id:', sel.id, 'name:', sel.name, 'value:', sel.value);
+                });
+                
+                const amountInput = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const methodSelect = row.querySelector('.split-method-select, select[id*="split_method"], select[name*="split_method"]');
+                const splitValueInput = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+                
+                if (!userSelect) {
+                    console.log('[AutoAddCurrentUser] Row', index, 'has no user select field - tried multiple selectors');
+                    return;
+                }
+                
+                // Get the value - try multiple methods for Select2
+                let rowUserId = userSelect.value;
+                console.log('[AutoAddCurrentUser] Row', index, 'userSelect.value:', rowUserId);
+                
+                // If using Select2, try to get the value from Select2
+                if ($) {
+                    try {
+                        const select2Instance = $(userSelect).data('select2');
+                        if (select2Instance) {
+                            const select2Val = $(userSelect).val();
+                            console.log('[AutoAddCurrentUser] Row', index, 'Select2 value:', select2Val);
+                            if (select2Val) {
+                                rowUserId = select2Val;
+                            }
+                        } else {
+                            // Try to get from the selected option
+                            const selectedOption = userSelect.options[userSelect.selectedIndex];
+                            if (selectedOption && selectedOption.value) {
+                                rowUserId = selectedOption.value;
+                                console.log('[AutoAddCurrentUser] Row', index, 'Selected option value:', rowUserId);
+                            }
+                        }
+                    } catch (e) {
+                        console.log('[AutoAddCurrentUser] Row', index, 'Error getting Select2 value:', e);
+                    }
+                }
+                
+                console.log('[AutoAddCurrentUser] Row', index, 'Final rowUserId:', rowUserId);
+                
+                if (rowUserId) {
+                    console.log('[AutoAddCurrentUser] Found row with user:', rowUserId, 'Current user:', userId);
+                    
+                    if (rowUserId == userId) {
+                        // This is the current user's row
+                        currentUserRow = row;
+                        console.log('[AutoAddCurrentUser] Found current user row');
+                    } else {
+                        // This is another user's split
+                        hasOtherUserSplits = true;
+                        console.log('[AutoAddCurrentUser] Found other user split, hasOtherUserSplits = true');
+                        
+                        // Calculate percentage based on method (from main field)
+                        const method = getCurrentSplitMethod();
+                        if (method === 'percentage' && splitValueInput) {
+                            const percentage = parseFloat(splitValueInput.value) || 0;
+                            totalOtherPercentage += percentage;
+                            console.log('[AutoAddCurrentUser] Added percentage:', percentage, 'Total now:', totalOtherPercentage);
+                        } else if (method === 'shares' && splitValueInput) {
+                            // For shares, calculate percentage from the calculated amount
+                            const amount = parseFloat(amountInput.value) || 0;
+                            if (amount > 0 && transactionAmount > 0) {
+                                const pct = (amount / transactionAmount) * 100;
+                                totalOtherPercentage += pct;
+                                console.log('[AutoAddCurrentUser] Added shares percentage:', pct, 'Total now:', totalOtherPercentage);
+                            }
+                        } else if (amountInput) {
+                            // Amount method - convert to percentage
+                            const amount = parseFloat(amountInput.value) || 0;
+                            if (amount > 0 && transactionAmount > 0) {
+                                const pct = (amount / transactionAmount) * 100;
+                                totalOtherPercentage += pct;
+                                console.log('[AutoAddCurrentUser] Added amount percentage:', pct, 'Total now:', totalOtherPercentage);
+                            }
+                        }
+                        // If no method is set yet or no value is entered, still mark that we have other user splits
+                        // This allows the current user to start at 100% when first row is added
+                    }
+                } else {
+                    console.log('[AutoAddCurrentUser] Row', index, 'has no user ID set');
+                }
+            });
+            
+            // Only auto-add if there are other user splits (and it's not the current user)
+            if (!hasOtherUserSplits) {
+                console.log('[AutoAddCurrentUser] No other user splits found, skipping');
+                console.log('[AutoAddCurrentUser] Debug: Checked', rows.length, 'rows');
+                return;
+            }
+            
+            // Calculate current user's percentage (100% - other percentages)
+            // If no other percentages are set yet (first row just added), start with 100%
+            // Always ensure we have a percentage, even if other splits don't have values yet
+            let currentUserPercentage = 100;
+            if (totalOtherPercentage > 0) {
+                currentUserPercentage = Math.max(0, 100 - totalOtherPercentage);
+            }
+            console.log('[AutoAddCurrentUser] Total other percentage:', totalOtherPercentage, 'Current user percentage:', currentUserPercentage);
+            
+            if (currentUserRow) {
+                console.log('[AutoAddCurrentUser] Current user row exists, updating percentage');
+                
+                // Update existing current user row
+                const splitValueInput = currentUserRow.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+                const amountInput = currentUserRow.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                
+                if (splitValueInput) {
+                    // Update visibility based on main method
+                    updateRowVisibility(currentUserRow);
+                    
+                    // Set the percentage value only if method is percentage
+                    const method = getCurrentSplitMethod();
+                    if (method === 'percentage') {
+                        splitValueInput.value = currentUserPercentage.toFixed(2);
+                        splitValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        splitValueInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        // Calculate and set the amount
+                        if (amountInput) {
+                            const calculatedAmount = (transactionAmount * currentUserPercentage) / 100;
+                            amountInput.value = calculatedAmount.toFixed(2);
+                            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            amountInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    } else {
+                        // For other methods, just recalculate
+                        calculateSplitAmount(currentUserRow);
+                    }
+                }
+            } else {
+                // Check if the initial current user row exists but wasn't detected (maybe Select2 value not set yet)
+                // Only create a new current user row if we haven't already added the initial one
+                // The initial one should be the only non-editable current user row
+                if (initialCurrentUserRowAdded) {
+                    console.log('[AutoAddCurrentUser] Initial current user row was already added, but not found in rows. This might be a timing issue. Skipping to avoid duplicate.');
+                    return;
+                }
+                
+                console.log('[AutoAddCurrentUser] Current user row does not exist, need to create one');
+                console.log('[AutoAddCurrentUser] Will create row with percentage:', currentUserPercentage);
+                
+                // Find or create an empty row for current user
+                let emptyRow = null;
+                rows.forEach(row => {
+                    const deleteCheckbox = row.querySelector('input[id*="DELETE"]');
+                    if (deleteCheckbox && deleteCheckbox.checked) return;
+                    
+                    const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                    if (userSelect && !userSelect.value) {
+                        emptyRow = row;
+                        console.log('[AutoAddCurrentUser] Found empty row');
+                    }
+                });
+                
+                if (emptyRow) {
+                    console.log('[AutoAddCurrentUser] Using empty row, populating it');
+                    populateCurrentUserRow(emptyRow, userId, currentUserPercentage, transactionAmount, false);
+                } else {
+                    // No empty row found, add a new one using AJAX
+                    console.log('[AutoAddCurrentUser] No empty row found, adding new row via AJAX');
+                    addNewSplitRowAjax(userId, currentUserPercentage, function(newRow) {
+                        if (newRow) {
+                            console.log('[AutoAddCurrentUser] New row added successfully, populating it');
+                            populateCurrentUserRow(newRow, userId, currentUserPercentage, transactionAmount, false);
+                        } else {
+                            console.log('[AutoAddCurrentUser] Failed to add new row - addNewSplitRowAjax returned null');
+                            // Try one more time after a delay
+                            setTimeout(function() {
+                                console.log('[AutoAddCurrentUser] Retrying to add row');
+                                addNewSplitRowAjax(userId, currentUserPercentage, function(retryRow) {
+                                    if (retryRow) {
+                                        console.log('[AutoAddCurrentUser] Retry successful, populating row');
+                                        populateCurrentUserRow(retryRow, userId, currentUserPercentage, transactionAmount, false);
+                                    } else {
+                                        console.log('[AutoAddCurrentUser] Retry also failed');
+                                    }
+                                });
+                            }, 1000);
+                        }
+                    });
+                }
+            }
+        }
+        
+        // Helper function to make a row non-editable (for current user row)
+        function makeRowNonEditable(row) {
+            // Check if there's already an initial non-editable row - if so, don't make this one non-editable
+            const existingInitialRow = document.querySelector('[data-initial-non-editable-row="true"]');
+            if (existingInitialRow && existingInitialRow !== row) {
+                console.log('[MakeRowNonEditable] Another row is already marked as initial non-editable, skipping this row');
+                return;
+            }
+            
+            // Mark this row as the initial non-editable row
+            row.setAttribute('data-initial-non-editable-row', 'true');
+            
+            const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+            const splitValueInput = row.querySelector('.split-value-input, input[id*="split_value"], input[name*="split_value"]');
+            const amountInput = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            
+            const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            
+            // Disable user select and Select2
+            if (userSelect) {
+                userSelect.disabled = true;
+                if ($ && $(userSelect).data('select2')) {
+                    $(userSelect).prop('disabled', true);
+                    const select2Container = $(userSelect).next('.select2-container');
+                    if (select2Container.length) {
+                        select2Container.addClass('select2-container--disabled');
+                        select2Container.css('pointer-events', 'none');
+                    }
+                }
+            }
+            
+            // Disable split value input
+            if (splitValueInput) {
+                splitValueInput.disabled = true;
+                splitValueInput.readOnly = true;
+            }
+            
+            // Disable amount input
+            if (amountInput) {
+                amountInput.disabled = true;
+                amountInput.readOnly = true;
+            }
+        }
+        
+        // Helper function to populate current user row
+        function populateCurrentUserRow(row, userId, percentage, transactionAmount, makeNonEditable) {
+            console.log('[PopulateCurrentUserRow] Starting to populate row for user:', userId, 'percentage:', percentage, 'makeNonEditable:', makeNonEditable);
+            
+            // Try multiple selectors to find the user select field
+            let userSelect = row.querySelector('select[id*="splits-"][id*="user"]');
+            if (!userSelect) {
+                userSelect = row.querySelector('select[name*="splits-"][name*="user"]');
+            }
+            if (!userSelect) {
+                userSelect = row.querySelector('select[id*="user"]');
+            }
+            if (!userSelect) {
+                userSelect = row.querySelector('select[name*="user"]');
+            }
+            
+            // Try multiple selectors for amount
+            let amountInput = row.querySelector('input[id*="splits-"][id*="amount"]');
+            if (!amountInput) {
+                amountInput = row.querySelector('input[name*="splits-"][name*="amount"]');
+            }
+            if (!amountInput) {
+                amountInput = row.querySelector('input[id*="amount"]');
+            }
+            
+            // Try multiple selectors for split value
+            let splitValueInput = row.querySelector('.split-value-input');
+            if (!splitValueInput) {
+                splitValueInput = row.querySelector('input[id*="split_value"]');
+            }
+            if (!splitValueInput) {
+                splitValueInput = row.querySelector('input[name*="split_value"]');
+            }
+            
+            // Debug: log what we found
+            console.log('[PopulateCurrentUserRow] userSelect:', userSelect ? userSelect.id || userSelect.name : 'NOT FOUND');
+            console.log('[PopulateCurrentUserRow] amountInput:', amountInput ? amountInput.id || amountInput.name : 'NOT FOUND');
+            console.log('[PopulateCurrentUserRow] splitValueInput:', splitValueInput ? splitValueInput.id || splitValueInput.name : 'NOT FOUND');
+            
+            if (!userSelect) {
+                console.error('[PopulateCurrentUserRow] Missing userSelect - row HTML:', row.innerHTML.substring(0, 500));
+                // Try to wait a bit and retry
+                setTimeout(function() {
+                    populateCurrentUserRow(row, userId, percentage, transactionAmount, makeNonEditable);
+                }, 200);
+                return;
+            }
+            if (!amountInput) {
+                console.error('[PopulateCurrentUserRow] Missing amountInput');
+                return;
+            }
+            // splitValueInput is optional - only needed for percentage/shares methods
+            
+            console.log('[PopulateCurrentUserRow] All fields found, proceeding');
+            
+            // Function to set values - will be called after Select2 is initialized
+            const setValues = function() {
+                const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            
+            // Set user using Select2 if available
+                if ($ && ($(userSelect).hasClass('admin-autocomplete') || $(userSelect).data('autocomplete-light-function') || $(userSelect).data('select2'))) {
+                    // Select2 is available, use it
+                    const select2Instance = $(userSelect).data('select2');
+                    if (select2Instance) {
+                        // Select2 is initialized, set the value properly
+                        // First, try to create an option if it doesn't exist
+                        const optionExists = $(userSelect).find('option[value="' + String(userId) + '"]').length > 0;
+                        if (!optionExists) {
+                            // Create the option with user email as text (we have currentUserEmail available)
+                            const userText = currentUserEmail || String(userId);
+                            const newOption = new Option(userText, String(userId), true, true);
+                            $(userSelect).append(newOption);
+                            console.log('[PopulateCurrentUserRow] Created option for user:', userId, 'text:', userText);
+                        }
+                        
+                        // Set the value using Select2 API
+                        $(userSelect).val(String(userId)).trigger('change');
+                        
+                        // Also update Select2's data if available
+                        if (select2Instance && select2Instance.dataAdapter) {
+                            // Try to update the selection
+                            const userText = currentUserEmail || String(userId);
+                            const option = $(userSelect).find('option[value="' + String(userId) + '"]');
+                            if (option.length) {
+                                option.text(userText);
+                            }
+                        }
+                        
+                        // Force Select2 to update its display
+                        $(userSelect).trigger('change');
+                        
+                        console.log('[PopulateCurrentUserRow] Set user via Select2:', userId, 'Select2 instance:', !!select2Instance);
+                    } else {
+                        // Select2 not initialized yet, set directly and it will be picked up
+                        userSelect.value = String(userId);
+                        // Also create option if it doesn't exist
+                        const optionExists = userSelect.querySelector('option[value="' + String(userId) + '"]');
+                        if (!optionExists) {
+                            const userText = currentUserEmail || String(userId);
+                            const newOption = document.createElement('option');
+                            newOption.value = String(userId);
+                            newOption.text = userText;
+                            newOption.selected = true;
+                            userSelect.appendChild(newOption);
+                        }
+                        $(userSelect).val(String(userId)).trigger('change');
+                        console.log('[PopulateCurrentUserRow] Set user directly (Select2 not ready):', userId);
+                    }
+            } else {
+                // Direct assignment
+                    userSelect.value = String(userId);
+                userSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    console.log('[PopulateCurrentUserRow] Set user directly (no Select2):', userId);
+                }
+                
+                // Update visibility based on main method
+                updateRowVisibility(row);
+                
+                // Set the percentage value only if method is percentage
+                const method = getCurrentSplitMethod();
+                if (method === 'percentage') {
+                    splitValueInput.value = percentage.toFixed(2);
+                    splitValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    splitValueInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Calculate and set the amount
+                    const calculatedAmount = (transactionAmount * percentage) / 100;
+                    amountInput.value = calculatedAmount.toFixed(2);
+                    amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    amountInput.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                    // For other methods, just recalculate
+                    calculateSplitAmount(row);
+                }
+                
+                // Make row non-editable if requested
+                if (makeNonEditable) {
+                    setTimeout(function() {
+                        makeRowNonEditable(row);
+                    }, 100);
+                }
+            };
+            
+            // Wait for Select2 to be initialized if it's an autocomplete field
+            const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            if ($ && ($(userSelect).hasClass('admin-autocomplete') || $(userSelect).data('autocomplete-light-function'))) {
+                // Wait for Select2 initialization - give it more time
+                let attempts = 0;
+                const checkSelect2 = function() {
+                    attempts++;
+                    const select2Ready = $(userSelect).data('select2');
+                    console.log('[PopulateCurrentUserRow] Check Select2 attempt', attempts, 'ready:', !!select2Ready);
+                    
+                    if (select2Ready || attempts > 20) {
+                        // Wait a bit more for Select2 to be fully ready
+                        setTimeout(function() {
+                            setValues();
+                            // Also verify the value was set after a short delay
+                            setTimeout(function() {
+                                const currentValue = $(userSelect).val();
+                                console.log('[PopulateCurrentUserRow] Value after setting:', currentValue, 'Expected:', userId);
+                                if (currentValue !== String(userId)) {
+                                    console.warn('[PopulateCurrentUserRow] Value not set correctly, retrying...');
+                                    // Try setting again
+                                    $(userSelect).val(String(userId)).trigger('change');
+                                }
+                }, 200);
+                        }, 100);
+                    } else {
+                        setTimeout(checkSelect2, 100);
+                    }
+                };
+                setTimeout(checkSelect2, 100);
+            } else {
+                // No Select2, set values immediately
+                setValues();
+            }
+        }
+        
+        // Function to get current split method from main form field
+        function getCurrentSplitMethod() {
+            if (splitMethodField) {
+                return splitMethodField.value || 'equally';
+            }
+            return 'equally';
+        }
+        
+        // Function to sync split method across all rows (from main field)
+        function syncSplitMethodToAllRows() {
+            const selectedMethod = getCurrentSplitMethod();
+            const splitGroup = findSplitGroup();
+            if (!splitGroup) return;
+            
+            const rows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                const hasSplitField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                     row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                const deleteCheckbox = row.querySelector('input[id*="DELETE"], input[name*="DELETE"]');
+                const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                return hasSplitField && isNotEmptyForm && isNotDeleted;
+            });
+            
+            // Update visibility for all rows based on main method
+            rows.forEach(row => {
+                    updateRowVisibility(row);
+            });
+            
+            // Hide any split_method fields in individual rows (they shouldn't exist, but just in case)
+            rows.forEach(row => {
+                const methodSelect = row.querySelector('.split-method-select, select[id*="split_method"], select[name*="split_method"]');
+                if (methodSelect) {
+                    methodSelect.style.display = 'none';
+                    const label = row.querySelector('label[for*="split_method"]');
+                    if (label) {
+                        label.style.display = 'none';
+                    }
+                }
+            });
+            
+            // Recalculate all splits after syncing method
+            setTimeout(function() {
+                if (selectedMethod === 'equally' || selectedMethod === 'shares' || selectedMethod === 'percentage') {
+                    recalculateAllSplits();
+                }
+            }, 50);
+        }
+        
+        // Function to ensure first row is current user
+        function ensureFirstRowIsCurrentUser() {
+            const splitGroup = findSplitGroup();
+            if (!splitGroup) return;
+            
+            const userId = findCurrentUserId();
+            if (!userId) return;
+            
+            const rows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                const hasSplitField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                     row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                const deleteCheckbox = row.querySelector('input[id*="DELETE"], input[name*="DELETE"]');
+                const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                return hasSplitField && isNotEmptyForm && isNotDeleted;
+            });
+            
+            if (rows.length === 0) return;
+            
+            const firstRow = rows[0];
+            const firstRowUserSelect = firstRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+            if (!firstRowUserSelect) return;
+            
+            // Check if first row has current user
+            const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+            let firstRowUserId = firstRowUserSelect.value;
+            
+            if ($ && $(firstRowUserSelect).data('select2')) {
+                const select2Val = $(firstRowUserSelect).val();
+                if (select2Val) {
+                    firstRowUserId = String(select2Val);
+                }
+            }
+            
+            // If first row is not current user, swap with a row that has current user, or move current user row to first
+            if (firstRowUserId && String(firstRowUserId) !== String(userId)) {
+                // Find current user row
+                let currentUserRow = null;
+                for (let i = 1; i < rows.length; i++) {
+                    const row = rows[i];
+                    const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                    if (!userSelect) continue;
+                    
+                    let rowUserId = userSelect.value;
+                    if ($ && $(userSelect).data('select2')) {
+                        const select2Val = $(userSelect).val();
+                        if (select2Val) {
+                            rowUserId = String(select2Val);
+                        }
+                    }
+                    
+                    if (rowUserId && String(rowUserId) === String(userId)) {
+                        currentUserRow = row;
+                        break;
+                    }
+                }
+                
+                // If current user row exists, swap it with first row
+                if (currentUserRow) {
+                    const tbody = splitGroup.querySelector('tbody');
+                    if (tbody) {
+                        // Swap DOM positions
+                        tbody.insertBefore(currentUserRow, firstRow);
+                    }
+                } else {
+                    // Current user row doesn't exist, populate first row with current user
+                    const amountField = document.getElementById('id_amount');
+                    const transactionAmount = amountField ? parseFloat(amountField.value) || 0 : 0;
+                    if (transactionAmount > 0) {
+                        populateCurrentUserRow(firstRow, userId, 100, transactionAmount, false);
+                    }
+                }
+            } else if (!firstRowUserId) {
+                // First row has no user, populate it with current user
+                const amountField = document.getElementById('id_amount');
+                const transactionAmount = amountField ? parseFloat(amountField.value) || 0 : 0;
+                if (transactionAmount > 0) {
+                    populateCurrentUserRow(firstRow, userId, 100, transactionAmount, false);
+                }
+            }
+        }
+        
+        // Listen for changes to main split method field
+        if (splitMethodField) {
+            splitMethodField.addEventListener('change', function() {
+                const method = this.value || 'equally';
+                
+                // Sync method to all rows
+                syncSplitMethodToAllRows();
+                
+                // Recalculate all splits
+                if (method === 'equally' || method === 'shares' || method === 'percentage') {
+                    setTimeout(recalculateAllSplits, 100);
+                }
+                
+                    // Recalculate remainder after method change
+                    setTimeout(autoAddCurrentUserSplit, 200);
+            });
+            }
+        
+        // Use event delegation for dynamic rows
+        document.addEventListener('change', function(e) {
+            
+            // Detect when a user is selected in a split
+            if (e.target.matches('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]')) {
+                const row = e.target.closest('tr, .form-row, .inline-related');
+                if (row && e.target.value) {
+                    console.log('[UserSelected] User selected in split:', e.target.value);
+                    const selectedUserId = e.target.value;
+                    const currentUserId = findCurrentUserId();
+                    
+                    // Ensure first row is always current user
+                    setTimeout(function() {
+                        ensureFirstRowIsCurrentUser();
+                    }, 100);
+                    
+                    // If a different user was selected (not current user), auto-add current user row
+                    if (selectedUserId != currentUserId) {
+                        console.log('[UserSelected] Different user selected, will auto-add current user row');
+                        // Wait a bit for the row to be fully initialized
+                        setTimeout(function() {
+                            console.log('[UserSelected] Calling autoAddCurrentUserSplit');
+                            autoAddCurrentUserSplit();
+                            
+                            // Also recalculate amounts if using shares/percentage
+                            const method = getCurrentSplitMethod();
+                            if (method === 'shares') {
+                                setTimeout(function() {
+                                    recalculateAllSplits();
+                                    setTimeout(autoAddCurrentUserSplit, 200);
+                                }, 100);
+                            } else if (method === 'percentage') {
+                                calculateSplitAmount(row);
+                                // Recalculate current user percentage after this one
+                                setTimeout(autoAddCurrentUserSplit, 200);
+                            } else {
+                                // Amount method - recalculate current user
+                                setTimeout(autoAddCurrentUserSplit, 200);
+                            }
+                        }, 300);
+                    }
+                }
+            }
+            if (e.target.matches('.split-value-input, input[id*="split_value"], input[name*="split_value"]')) {
+                const row = e.target.closest('tr, .form-row, .inline-related');
+                if (row) {
+                    const method = getCurrentSplitMethod();
+                    if (method === 'shares') {
+                        // Recalculate all shares when any share value changes
+                        setTimeout(function() {
+                            recalculateAllSplits();
+                            setTimeout(autoAddCurrentUserSplit, 200);
+                        }, 100);
+                    } else if (method === 'percentage') {
+                        // Calculate amount immediately when percentage changes
+                        calculateSplitAmount(row);
+                        // Recalculate current user percentage
+                        setTimeout(autoAddCurrentUserSplit, 200);
+                    }
+                }
+            }
+        });
+        
+           // Also listen to input events for real-time updates
+           document.addEventListener('input', function(e) {
+            if (e.target.matches('.split-value-input, input[id*="split_value"], input[name*="split_value"]')) {
+                const row = e.target.closest('tr, .form-row, .inline-related');
+                if (row) {
+                    const method = getCurrentSplitMethod();
+                    
+                    if (method === 'shares') {
+                        // Debounce recalculation for shares
+                        clearTimeout(window.sharesRecalcTimeout);
+                        window.sharesRecalcTimeout = setTimeout(function() {
+                            recalculateAllSplits();
+                            setTimeout(autoAddCurrentUserSplit, 200);
+                        }, 300);
+                    } else if (method === 'percentage') {
+                        // Debounce calculation for percentage
+                        clearTimeout(window.percentageRecalcTimeout);
+                        window.percentageRecalcTimeout = setTimeout(function() {
+                            calculateSplitAmount(row);
+                            setTimeout(autoAddCurrentUserSplit, 200);
+                        }, 300);
+                    }
+                }
+            }
+            
+            // Detect when split amount changes
+            if (e.target.matches('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]')) {
+                // Recalculate current user percentage when any amount changes
+                setTimeout(autoAddCurrentUserSplit, 200);
+            }
+            
+            // Detect when split method changes - recalculate current user percentage
+            if (e.target.matches('.split-method-select, select[id*="split_method"], select[name*="split_method"]')) {
+                setTimeout(autoAddCurrentUserSplit, 300);
+            }
+           });
+
+        // Run initialization multiple times to catch all scenarios
+        // Run when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(initializeAllSplitRows, 50);
+                setTimeout(initializeAllSplitRows, 200);
+                setTimeout(initializeAllSplitRows, 500);
+            });
+        } else {
+            setTimeout(initializeAllSplitRows, 50);
+            setTimeout(initializeAllSplitRows, 200);
+            setTimeout(initializeAllSplitRows, 500);
+        }
+        
+        // Also run after longer delay to catch dynamically loaded content
+        setTimeout(initializeAllSplitRows, 1000);
+        setTimeout(initializeAllSplitRows, 2000);
+        
+        // Ensure first row is current user on initialization and auto-populate if empty
+        setTimeout(function() {
+            ensureFirstRowIsCurrentUser();
+            // Auto-populate first row with current user if it's empty
+            const splitGroup = findSplitGroup();
+            if (splitGroup) {
+                const rows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                    const hasSplitField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                         row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                    const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                    const deleteCheckbox = row.querySelector('input[id*="DELETE"], input[name*="DELETE"]');
+                    const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                    return hasSplitField && isNotEmptyForm && isNotDeleted;
+                });
+                if (rows.length > 0) {
+                    const firstRow = rows[0];
+                    const userSelect = firstRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                    if (userSelect && !userSelect.value) {
+                        // First row is empty, populate with current user
+                        const userId = findCurrentUserId();
+                        if (userId) {
+                            const amountField = document.getElementById('id_amount');
+                            const transactionAmount = amountField ? parseFloat(amountField.value) || 0 : 0;
+                            if (transactionAmount > 0) {
+                                populateCurrentUserRow(firstRow, userId, 100, transactionAmount, false);
+                            }
+                        }
+                    }
+                }
+            }
+            // Sync method from main field to all rows
+            syncSplitMethodToAllRows();
+        }, 1500);
+        setTimeout(function() {
+            ensureFirstRowIsCurrentUser();
+        }, 2500);
+        
+        // Handle dynamically added rows (Django formset)
+        document.addEventListener('formset:added', function(event) {
+            if (event.detail && event.detail.row) {
+                setTimeout(function() {
+                    updateRowVisibility(event.detail.row);
+                    // Ensure first row is current user after new row is added
+                    ensureFirstRowIsCurrentUser();
+                    // Sync method to all rows
+                    syncSplitMethodToAllRows();
+                }, 100);
+            } else {
+                // Fallback: reinitialize all rows
+                setTimeout(function() {
+                    initializeAllSplitRows();
+                    ensureFirstRowIsCurrentUser();
+                    syncSplitMethodToAllRows();
+                }, 200);
+            }
+        });
+        
+        // Also observe DOM changes for dynamically added rows (for split method visibility)
+        const splitMethodObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.addedNodes.length) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) { // Element node
+                            const row = node.tagName === 'TR' ? node : node.closest('tr, .form-row, .inline-related');
+                            if (row && (row.querySelector('.split-method-select') || row.querySelector('select[id*="split_method"]'))) {
+                                setTimeout(function() {
+                                    updateRowVisibility(row);
+                                }, 100);
+                            }
+                        }
+                    });
+                }
+            });
+        });
+        
+        // Observe the splits group for new rows (for split method visibility updates)
+        setTimeout(function() {
+            const splitGroup = document.querySelector('#splits-group, .inline-group');
+            if (splitGroup) {
+                splitMethodObserver.observe(splitGroup, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+        }, 500);
+
+        // Recalculate when transaction amount changes
+        if (amountField) {
+            amountField.addEventListener('change', function() {
+                setTimeout(function() {
+                    recalculateAllSplits();
+                    autoAddCurrentUserSplit();
+                }, 200);
+            });
+            amountField.addEventListener('input', function() {
+                setTimeout(function() {
+                    recalculateAllSplits();
+                    autoAddCurrentUserSplit();
+                }, 200);
+            });
+        }
+        
+        // Also run auto-add on initialization
+        setTimeout(function() {
+            autoAddCurrentUserSplit();
+        }, 1500);
+        
+        // Listen for when a new split row is actually added to the DOM
+        let isAddingCurrentUserRow = false; // Flag to prevent infinite loops
+        let initialCurrentUserRowAdded = false; // Flag to track if we've already added the initial current user row (when first row was added)
+        
+        // Check on page load if there's already a current user row (for existing transactions)
+        setTimeout(function() {
+            const splitGroup = findSplitGroup();
+            if (splitGroup) {
+                const rowCount = countSplitRows(splitGroup);
+                const userId = findCurrentUserId();
+                if (userId && rowCount > 0) {
+                    // Check if current user row exists
+                    const existingRows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                        const hasSplitUserField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                        const hasSplitAmountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                        const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                        const deleteCheckbox = row.querySelector('input[id*="DELETE"]');
+                        const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                        return (hasSplitUserField || hasSplitAmountField) && isNotEmptyForm && isNotDeleted;
+                    });
+                    
+                    const hasCurrentUserRow = existingRows.some(row => {
+                        const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                        if (!userSelect) return false;
+                        const rowUserId = userSelect.value;
+                        const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+                        if ($ && $(userSelect).data('select2')) {
+                            const select2Val = $(userSelect).val();
+                            return select2Val && String(select2Val) === String(userId);
+                        }
+                        return rowUserId && String(rowUserId) === String(userId);
+                    });
+                    
+                    if (hasCurrentUserRow) {
+                        initialCurrentUserRowAdded = true;
+                        console.log('[Init] Found existing current user row on page load, setting initialCurrentUserRowAdded = true');
+                    }
+                }
+            }
+        }, 500);
+        
+        function findSplitGroup() {
+            // Try multiple selectors to find the splits inline group
+            const allInlineGroups = document.querySelectorAll('.inline-group, fieldset');
+            for (const group of allInlineGroups) {
+                const hasSplitFields = group.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                      group.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                if (hasSplitFields) {
+                    return group;
+                }
+            }
+            return null;
+        }
+        
+        function countSplitRows(splitGroup) {
+            if (!splitGroup) return 0;
+            
+            const rows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                const hasSplitUserField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                const hasSplitAmountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                const deleteCheckbox = row.querySelector('input[id*="DELETE"]');
+                const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                return (hasSplitUserField || hasSplitAmountField) && isNotEmptyForm && isNotDeleted;
+            });
+            return rows.length;
+        }
+        
+        function checkAndAddCurrentUserRow() {
+            if (isAddingCurrentUserRow) {
+                console.log('[CheckAndAddCurrentUserRow] Already adding current user row, skipping');
+                return;
+            }
+            
+            const splitGroup = findSplitGroup();
+            if (!splitGroup) {
+                console.log('[CheckAndAddCurrentUserRow] Split group not found');
+                return;
+            }
+            
+            const rowCount = countSplitRows(splitGroup);
+            console.log('[CheckAndAddCurrentUserRow] Found', rowCount, 'existing split rows, initialCurrentUserRowAdded:', initialCurrentUserRowAdded);
+            
+            // Only add the initial current user row once, when the first row is added
+            // If we've already added it, don't add it again
+            if (initialCurrentUserRowAdded) {
+                console.log('[CheckAndAddCurrentUserRow] Initial current user row already added, skipping');
+                return;
+            }
+            
+            // If exactly one row exists (the first row just added), add current user row
+            if (rowCount === 1) {
+                // Check if the current user row already exists
+                const userId = findCurrentUserId();
+                if (!userId) {
+                    console.log('[CheckAndAddCurrentUserRow] Current user ID not found');
+                    return;
+                }
+                
+                // Check if current user row exists
+                const existingRows = Array.from(splitGroup.querySelectorAll('tbody tr, .form-row, .inline-related')).filter(row => {
+                const hasSplitUserField = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                const hasSplitAmountField = row.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+                const isNotEmptyForm = !row.classList.contains('empty-form') && !row.classList.contains('add-row');
+                    const deleteCheckbox = row.querySelector('input[id*="DELETE"]');
+                    const isNotDeleted = !deleteCheckbox || !deleteCheckbox.checked;
+                    return (hasSplitUserField || hasSplitAmountField) && isNotEmptyForm && isNotDeleted;
+                });
+                
+                const hasCurrentUserRow = existingRows.some(row => {
+                    const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+                    if (!userSelect) return false;
+                    const rowUserId = userSelect.value;
+                    // Check Select2 value if available
+                    const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
+                    if ($ && $(userSelect).data('select2')) {
+                        const select2Val = $(userSelect).val();
+                        return select2Val && String(select2Val) === String(userId);
+                    }
+                    return rowUserId && String(rowUserId) === String(userId);
+                });
+                
+                if (hasCurrentUserRow) {
+                    console.log('[CheckAndAddCurrentUserRow] Current user row already exists');
+                    initialCurrentUserRowAdded = true; // Mark as added
+                    return;
+                }
+                
+                console.log('[CheckAndAddCurrentUserRow] First row detected, adding current user row with 100%');
+                isAddingCurrentUserRow = true;
+                
+                // Try multiple ways to find the amount field
+                let amountField = document.getElementById('id_amount');
+                if (!amountField) {
+                    amountField = document.querySelector('input[name="amount"]');
+                }
+                if (!amountField) {
+                    amountField = document.querySelector('input[id*="amount"]');
+                }
+                
+                const transactionAmount = amountField ? parseFloat(amountField.value) || 0 : 0;
+                console.log('[CheckAndAddCurrentUserRow] Transaction amount:', transactionAmount, 'from field:', amountField ? amountField.id : 'not found');
+                
+                if (transactionAmount > 0) {
+                    console.log('[CheckAndAddCurrentUserRow] Calling addNewSplitRowAjax with userId:', userId, 'amount:', 100);
+                    addNewSplitRowAjax(userId, 100, function(currentUserRow) {
+                        if (currentUserRow) {
+                            console.log('[CheckAndAddCurrentUserRow] Current user row added successfully, making it non-editable');
+                            populateCurrentUserRow(currentUserRow, userId, 100, transactionAmount, true);
+                            initialCurrentUserRowAdded = true; // Mark that we've added the initial current user row
+                        } else {
+                            console.error('[CheckAndAddCurrentUserRow] Failed to add current user row - addNewSplitRowAjax returned null');
+                        }
+                        isAddingCurrentUserRow = false;
+                    });
+                } else {
+                    console.warn('[CheckAndAddCurrentUserRow] Transaction amount is 0 or invalid, cannot add current user row');
+                    isAddingCurrentUserRow = false;
+                }
+            }
+        }
+        
+        // Direct click handler for add button - most reliable
+        document.addEventListener('click', function(e) {
+            const target = e.target;
+            const addButton = target.closest('.add-row a, .add-row button, a.add-row, .add-row');
+            
+            if (!addButton) return;
+            
+            // Find the inline group
+            const inlineGroup = addButton.closest('.inline-group, fieldset');
+            if (!inlineGroup) return;
+            
+            // Check if this is the splits group
+            const hasSplitFields = inlineGroup.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]') ||
+                                  inlineGroup.querySelector('input[id*="splits-"][id*="amount"], input[name*="splits-"][name*="amount"]');
+            
+            if (!hasSplitFields) return; // Not the splits group
+            
+            // Check row count before adding
+            const rowCountBefore = countSplitRows(inlineGroup);
+            console.log('[AddButtonClick] Add button clicked, row count before:', rowCountBefore);
+            
+            // If no rows exist, we'll ensure first row is current user after it's added
+            if (rowCountBefore === 0) {
+                console.log('[AddButtonClick] First row will be added, will ensure it's current user');
+                // Use multiple checks to ensure we catch the row when it's added
+                const checkMultipleTimes = function(attempts) {
+                    attempts = attempts || 0;
+                    if (attempts > 30) {
+                        console.log('[AddButtonClick] Max attempts reached, giving up');
+                        return;
+                    }
+                    
+                    const rowCountAfter = countSplitRows(inlineGroup);
+                    console.log('[AddButtonClick] Check attempt', attempts, 'row count:', rowCountAfter);
+                    
+                    if (rowCountAfter === 1) {
+                        console.log('[AddButtonClick] Exactly 1 row detected, ensuring it's current user');
+                        // Ensure first row is current user
+                        ensureFirstRowIsCurrentUser();
+                    } else if (rowCountAfter === 0) {
+                        // Row not added yet, check again
+                        requestAnimationFrame(function() {
+                            checkMultipleTimes(attempts + 1);
+                        });
+            } else {
+                        // More than 1 row - ensure first is current user
+                        console.log('[AddButtonClick] Found', rowCountAfter, 'rows, ensuring first is current user');
+                        ensureFirstRowIsCurrentUser();
+                    }
+                };
+                
+                // Start checking after a brief delay to let Django add the row
+                requestAnimationFrame(function() {
+                    checkMultipleTimes(0);
+                });
+            } else {
+                // Rows already exist, ensure first is current user
+                ensureFirstRowIsCurrentUser();
+            }
+        }, true); // Use capture phase to catch it early
+        
+        // Note: We don't use formset:added or MutationObserver for adding the initial current user row
+        // The click handler handles that when rowCountBefore === 0
+        // These events are only for other purposes (like autoAddCurrentUserSplit for remainder calculations)
+        
+        // Listen for Select2 change events on user fields (for autocomplete)
+        if ($) {
+            $(document).on('select2:select select2:clear', 'select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]', function(e) {
+                const row = $(this).closest('tr, .form-row, .inline-related')[0];
+                const selectedUserId = $(this).val();
+                const currentUserId = findCurrentUserId();
+                
+                console.log('[Select2UserSelected] User selected via Select2:', selectedUserId, 'Current user:', currentUserId);
+                
+                // Ensure first row is always current user
+                setTimeout(function() {
+                    ensureFirstRowIsCurrentUser();
+                }, 100);
+                
+                if (row && selectedUserId && selectedUserId != currentUserId) {
+                    console.log('[Select2UserSelected] Different user selected, will auto-add current user row');
+                    // Wait a bit longer to ensure the value is fully set
+                    setTimeout(function() {
+                        console.log('[Select2UserSelected] Calling autoAddCurrentUserSplit after delay');
+                        // Force a re-check by calling it multiple times with delays
+                        autoAddCurrentUserSplit();
+                        setTimeout(autoAddCurrentUserSplit, 200);
+                        setTimeout(autoAddCurrentUserSplit, 500);
+                        
+                        // Also handle method-specific calculations
+                        const method = getCurrentSplitMethod();
+                        if (method === 'shares') {
+                            setTimeout(function() {
+                                recalculateAllSplits();
+                                setTimeout(autoAddCurrentUserSplit, 200);
+                            }, 100);
+                        } else if (method === 'percentage') {
+                            calculateSplitAmount(row);
+                            setTimeout(autoAddCurrentUserSplit, 200);
+                        } else {
+                            setTimeout(autoAddCurrentUserSplit, 200);
+                        }
+                    }, 500);
+                }
+            });
+        }
+    }
+    // Setup split calculator
+    setupSplitCalculator();
+    
+    // Hide edit and view buttons for user autocomplete fields in splits
+    function hideUserAutocompleteButtons() {
+        // Find all user autocomplete fields in splits
+        const userSelects = document.querySelectorAll('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
+        userSelects.forEach(function(select) {
+            // Find the Select2 container
+            const select2Container = select.nextElementSibling;
+            if (select2Container && select2Container.classList.contains('select2-container')) {
+                // Find and hide any edit/view links after the Select2 container
+                let nextSibling = select2Container.nextElementSibling;
+                while (nextSibling) {
+                    if (nextSibling.tagName === 'A' && (nextSibling.href.includes('user') || nextSibling.textContent.includes('edit') || nextSibling.textContent.includes('view'))) {
+                        nextSibling.style.display = 'none';
+                    }
+                    nextSibling = nextSibling.nextElementSibling;
+                }
+                // Also check for buttons inside the Select2 container
+                const buttons = select2Container.querySelectorAll('a[href*="user"]');
+                buttons.forEach(function(btn) {
+                    btn.style.display = 'none';
+                });
+            }
+            // Also hide any links in the same table cell/row
+            const row = select.closest('tr, .form-row');
+            if (row) {
+                const links = row.querySelectorAll('a[href*="user"]');
+                links.forEach(function(link) {
+                    if (link.textContent.includes('edit') || link.textContent.includes('view') || link.classList.contains('related-lookup')) {
+                        link.style.display = 'none';
+                    }
+                });
+            }
+        });
+    }
+    
+    // Hide buttons on page load
+    hideUserAutocompleteButtons();
+    
+    // Hide buttons when new rows are added (observe DOM changes)
+    const observer = new MutationObserver(function(mutations) {
+        hideUserAutocompleteButtons();
+    });
+    
+    // Observe the splits inline group for changes
+    const splitGroup = document.querySelector('#splits-group, .inline-group');
+    if (splitGroup) {
+        observer.observe(splitGroup, {
+            childList: true,
+            subtree: true
+        });
+    }
+});
+</script>
+{% endblock %}
