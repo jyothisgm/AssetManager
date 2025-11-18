@@ -45,7 +45,6 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     // Get current user ID from template context
-    const currentUserId = {% if current_user_id %}{{ current_user_id }}{% else %}null{% endif %};
     const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
     
     // Get exchange rate record data from the form
@@ -647,7 +646,6 @@ function recalculateAllSplitAmounts() {
             if (transactionAmount <= 0) return;
     // Find all split rows (only those with IDs like splits-0, splits-1, etc.)
     const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
-    console.log(splitRows);
 
     // For shares method, we need to calculate total shares first, then calculate each amount
     // For other methods, we can calculate independently
@@ -778,7 +776,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     
     });
-    
+
     // Listen for clicks on "Remove" link (inline-deletelink)
     document.addEventListener('click', function(e) {
         const removeLink = e.target.closest('a.inline-deletelink');
@@ -848,20 +846,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Also listen for new rows being added (formset:added event)
     document.addEventListener('formset:added', function(event) {
         const splitMethod = splitMethodField ? (splitMethodField.value || 'equally') : 'equally';
-        
-        // Check if this is a splits formset addition
-        const addedRow = event.detail || event.target;
-        if (addedRow && (addedRow.id && addedRow.id.includes('splits-') || 
-            (addedRow.querySelector && addedRow.querySelector('input[id*="splits-"]')))) {
-            
-            // Use the autoPopulateFirstRow function which already handles duplicate checking
-            // This will be called after a delay to ensure the DOM is ready
-        }
-        
-        // Auto-populate first row if needed
-        setTimeout(autoPopulateFirstRow, 100);
-        setTimeout(autoPopulateFirstRow, 500);
-        
         // Update readonly state first
         setTimeout(function() {
             updateSplitFieldsReadonly();
@@ -1111,72 +1095,10 @@ document.addEventListener('DOMContentLoaded', function() {
             subtree: true
         });
     }
-    
-    // Function to auto-populate first row with current user if no user is selected
-    function autoPopulateFirstRow() {
-        if (!currentUserId) return;
-        
-        const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
-        if (splitRows.length === 0) return;
-        
-        // Check if current user is already selected in any row
-        let currentUserAlreadySelected = false;
-        let hasUserSelected = false;
-        splitRows.forEach(function(row) {
-            if (row.classList.contains('empty-form') || row.classList.contains('add-row')) return;
-            const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
-            if (userSelect && userSelect.value) {
-                hasUserSelected = true;
-                // Check if this is the current user
-                if (userSelect.value == currentUserId) {
-                    currentUserAlreadySelected = true;
-                }
-            }
-        });
-        
-        // Only auto-populate if:
-        // 1. No user is selected in any row, OR
-        // 2. Current user is not already selected (to prevent duplicates)
-        if (!hasUserSelected || !currentUserAlreadySelected) {
-            // Find the first empty row (no user selected)
-            for (let i = 0; i < splitRows.length; i++) {
-                const row = splitRows[i];
-                if (row.classList.contains('empty-form') || row.classList.contains('add-row')) continue;
-                
-                const userSelect = row.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
-                if (userSelect && !userSelect.value) {
-                    // Check if current user is already in another row
-                    let userExistsInOtherRow = false;
-                    splitRows.forEach(function(otherRow) {
-                        if (otherRow === row) return;
-                        if (otherRow.classList.contains('empty-form') || otherRow.classList.contains('add-row')) return;
-                        const otherUserSelect = otherRow.querySelector('select[id*="splits-"][id*="user"], select[name*="splits-"][name*="user"]');
-                        if (otherUserSelect && otherUserSelect.value == currentUserId) {
-                            userExistsInOtherRow = true;
-                        }
-                    });
-                    
-                    // Only populate if current user doesn't exist in another row
-                    if (!userExistsInOtherRow) {
-                        // Set the current user in this row
-                        const $ = (window.django && django.jQuery) ? django.jQuery : window.jQuery;
-                        if ($ && $.fn.select2 && $(userSelect).data('select2')) {
-                            $(userSelect).val(currentUserId).trigger('change');
-                        } else {
-                            userSelect.value = currentUserId;
-                            userSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                    }
-                    break; // Only populate the first empty row
-                }
-            }
-        }
-    }
-    
+
     // Add delete buttons to split rows
     function addDeleteButtonsToSplits() {
         const splitRows = Array.from(document.querySelectorAll('tr[id*="splits-"]')).filter(row => /^splits-\d+/.test(row.id || ''));
-        console.log(splitRows);
         splitRows.forEach(function(row) {
             // Skip if delete button already exists
             if (row.querySelector('.split-delete-button')) {
@@ -1285,11 +1207,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(runAddDeleteButtons, 300);
     setTimeout(runAddDeleteButtons, 500);
     setTimeout(runAddDeleteButtons, 1000);
-    
-    // Auto-populate first row on page load
-    setTimeout(autoPopulateFirstRow, 100);
-    setTimeout(autoPopulateFirstRow, 500);
-    setTimeout(autoPopulateFirstRow, 1000);
     setTimeout(runAddDeleteButtons, 2000);
     
     // Add delete buttons when formset rows are added
