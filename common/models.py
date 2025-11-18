@@ -182,3 +182,35 @@ class Currency(TimeStampedModel):
         except Exception as e:
             logger.exception(f"[{func_name}] Error in canonical method")
             raise e
+
+
+class AIModelConfig(TimeStampedModel):
+    """
+    Stores AI model metadata + credentials so we can rotate between providers.
+    """
+    MODEL_TYPES = [
+        ("text", "Text-only"),
+        ("multimodal", "Multimodal"),
+        ("speech", "Speech / TTS"),
+        ("vision", "Vision / Image"),
+    ]
+
+    name = models.CharField(max_length=128, unique=True, help_text="Friendly name used in the app.")
+    provider = models.CharField(max_length=64, help_text="e.g., Google, OpenAI, Anthropic.")
+    model_id = models.CharField(max_length=255, help_text="Exact identifier required by the provider.")
+    api_key = models.CharField(max_length=255, blank=True, null=True, help_text="Optional provider-specific key.")
+    type = models.CharField(max_length=32, choices=MODEL_TYPES, default="text")
+    priority = models.PositiveIntegerField(default=0, help_text="Lower numbers = preferred for failover.")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["priority", "name"]
+        verbose_name = "AI Model"
+        verbose_name_plural = "AI Models"
+        indexes = [
+            models.Index(fields=["provider", "model_id"]),
+        ]
+
+    def __str__(self):
+        status = "active" if self.is_active else "disabled"
+        return f"{self.name} ({self.provider}/{self.model_id}) [{status}]"

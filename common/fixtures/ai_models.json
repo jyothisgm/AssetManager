@@ -1,0 +1,290 @@
+[
+  {
+    "model": "common.aimodelconfig",
+    "pk": 1,
+    "fields": {
+      "name": "Gemini 2.5 Flash Lite",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash-lite",
+      "api_key": null,
+      "type": "text",
+      "priority": 0,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 2,
+    "fields": {
+      "name": "Gemini 2.5 Flash",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash",
+      "api_key": null,
+      "type": "text",
+      "priority": 5,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 3,
+    "fields": {
+      "name": "Gemini 2.0 Flash Lite",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash-lite",
+      "api_key": null,
+      "type": "text",
+      "priority": 10,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 4,
+    "fields": {
+      "name": "Gemini 2.0 Flash",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash",
+      "api_key": null,
+      "type": "text",
+      "priority": 15,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 5,
+    "fields": {
+      "name": "Gemini 2.5 Pro",
+      "provider": "google",
+      "model_id": "gemini-2.5-pro",
+      "api_key": null,
+      "type": "text",
+      "priority": 20,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 6,
+    "fields": {
+      "name": "Gemini 2.5 Pro Experimental",
+      "provider": "google",
+      "model_id": "gemini-2.5-pro-exp",
+      "api_key": null,
+      "type": "text",
+      "priority": 25,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 14,
+    "fields": {
+      "name": "Gemini 2.5 Flash Lite (MM)",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash-lite",
+      "api_key": null,
+      "type": "multimodal",
+      "priority": 0,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 15,
+    "fields": {
+      "name": "Gemini 2.5 Flash (MM)",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash",
+      "api_key": null,
+      "type": "multimodal",
+      "priority": 5,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 16,
+    "fields": {
+      "name": "Gemini 2.0 Flash Lite (MM)",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash-lite",
+      "api_key": null,
+      "type": "multimodal",
+      "priority": 10,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 17,
+    "fields": {
+      "name": "Gemini 2.0 Flash (MM)",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash",
+      "api_key": null,
+      "type": "multimodal",
+      "priority": 15,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 18,
+    "fields": {
+      "name": "Gemini 2.5 Pro (MM)",
+      "provider": "google",
+      "model_id": "gemini-2.5-pro",
+      "api_key": null,
+      "type": "multimodal",
+      "priority": 20,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 7,
+    "fields": {
+      "name": "Gemini 2.5 Flash Preview Image",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash-preview-image",
+      "api_key": null,
+      "type": "vision",
+      "priority": 0,
+      "is_active": false,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 8,
+    "fields": {
+      "name": "Gemini 2.0 Flash Preview Image",
+      "provider": "google",
+      "model_id": "gemini-2.0-flash-preview-image-generation",
+      "api_key": null,
+      "type": "vision",
+      "priority": 5,
+      "is_active": false,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 9,
+    "fields": {
+      "name": "Imagen 4.0 Fast",
+      "provider": "google",
+      "model_id": "imagen-4.0-fast-generate",
+      "api_key": null,
+      "type": "vision",
+      "priority": 10,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 10,
+    "fields": {
+      "name": "Imagen 4.0 Ultra",
+      "provider": "google",
+      "model_id": "imagen-4.0-ultra-generate",
+      "api_key": null,
+      "type": "vision",
+      "priority": 15,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 11,
+    "fields": {
+      "name": "Veo 3.0 Generate",
+      "provider": "google",
+      "model_id": "veo-3.0-generate",
+      "api_key": null,
+      "type": "vision",
+      "priority": 20,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 12,
+    "fields": {
+      "name": "Gemini 2.5 Flash TTS",
+      "provider": "google",
+      "model_id": "gemini-2.5-flash-tts",
+      "api_key": null,
+      "type": "speech",
+      "priority": 0,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  },
+  {
+    "model": "common.aimodelconfig",
+    "pk": 13,
+    "fields": {
+      "name": "Gemini 2.5 Pro TTS",
+      "provider": "google",
+      "model_id": "gemini-2.5-pro-tts",
+      "api_key": null,
+      "type": "speech",
+      "priority": 5,
+      "is_active": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "modified_at": "2025-01-01T00:00:00Z",
+      "is_deleted": false
+    }
+  }
+]

@@ -527,7 +527,7 @@ class TransactionAdmin(RestrictedAdmin):
     ordering = ("-date",)
     readonly_fields = ("linked_transaction", "fee", "exchange_rate_record_display", "processed", "view_attachment",
                         "created_at", "modified_at", "total_from_items", "totals_match")
-    autocomplete_fields = ("category", "account", "currency", "store", "attachment")
+    autocomplete_fields = ("category", "account", "currency", "store")
     inlines = [TransactionItemInline, TransactionSplitInline]
     change_list_template = "admin/invoice/invoice_changelist.html"
     actions = ["edit_selected"]
